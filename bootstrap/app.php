@@ -12,7 +12,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withProviders([
-        \App\Modules\Auth\Providers\AuthServiceProvider::class,
+      
     ])
     ->withMiddleware(function (Middleware $middleware) {
         //
