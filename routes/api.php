@@ -45,8 +45,13 @@ Route::prefix('auth')->group(function () {
 /**
  * PROTECTED ROUTES (Sanctum Bearer)
  */
-Route::middleware('auth:sanctum')->get('/me', function (Request $request) {
+Route::middleware('auth:sanctum')->get('/me', function (\Illuminate\Http\Request $request) {
     $u = $request->user();
+    if (!$u) {
+        // fallback defensif: kalau middleware lolos tapi user null, balikin 401
+        return response()->json(['ok' => false, 'error' => 'unauthorized'], 401);
+    }
+
     return response()->json([
         'ok' => true,
         'user' => [
@@ -57,8 +62,8 @@ Route::middleware('auth:sanctum')->get('/me', function (Request $request) {
     ]);
 })->name('auth.me');
 
-Route::middleware('auth:sanctum')->post('/logout', function (Request $request) {
-    $token = $request->user()->currentAccessToken();
+Route::middleware('auth:sanctum')->post('/logout', function (\Illuminate\Http\Request $request) {
+    $token = $request->user()?->currentAccessToken();
     if ($token) {
         $token->delete();
     }
