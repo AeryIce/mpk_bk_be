@@ -8,17 +8,24 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log; // <— tambahkan ini
+use Illuminate\Contracts\Mail\Mailable as MailableContract;
+use App\Mail\MagicLinkMail;
 
 class MagicLinkController extends Controller
 {
-    // Generator token: tepat 64 karakter HEX, tanpa panggil random_bytes di file ini
+    /**
+     * Generator token 64 hex chars (tanpa random_bytes supaya linter adem).
+     */
     private function makeToken(): string
     {
-        // Kombinasi UUID + entropi + timestamp → sha256 (64 hex chars)
         return hash('sha256', Str::uuid()->toString() . '|' . Str::random(40) . '|' . microtime(true));
     }
 
-    // POST /api/auth/magic-link/request
+    /**
+     * POST /api/auth/magic-link/request
+     */
     public function request(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -43,19 +50,32 @@ class MagicLinkController extends Controller
             'email'      => $email,
             'token'      => $token,
             'purpose'    => $purpose,
-            //'expires_at' => now()->addMinutes(30),
             'expires_at' => now()->addMinutes((int) config('magiclink.ttl_minutes', 30)),
             'meta'       => ['ip' => $request->ip(), 'ua' => $request->userAgent()],
         ]);
+
+        // Build URL magic-link (klik GET → consume)
+        $fe   = (string) config('magiclink.frontend_url');
+        $base = $fe !== '' ? rtrim($fe, '/') : rtrim(config('app.url'), '/');
+        $url  = $base . '/api/auth/magic-link/consume/' . $token;
+
+        // Kirim email via mailer aktif (SES di prod, log di lokal)
+        if (filter_var(env('EMAIL_ENABLED', true), FILTER_VALIDATE_BOOL)) {
+            if (config('mail.default') === 'log') {
+                Log::info('Magic link URL (dev): ' . $url); // <— pakai Log::
+            }
+            /** @var MailableContract $mailable */
+            $mailable = new MagicLinkMail($email, $purpose, $url);
+            Mail::to($email)->send($mailable);
+        }
 
         $payload = [
             'ok'         => true,
             'message'    => 'If an account exists, a magic link will be sent.',
             'purpose'    => $purpose,
-            'expires_in' => 1800,
+            'expires_in' => (int) config('magiclink.ttl_minutes', 30) * 60,
         ];
 
-        // DEV helper: hanya di lokal, bocorkan token untuk testing cepat
         if (app()->environment('local')) {
             $payload['dev_token'] = $token;
         }
@@ -63,7 +83,9 @@ class MagicLinkController extends Controller
         return response()->json($payload);
     }
 
-    // POST /api/auth/magic-link/consume
+    /**
+     * POST /api/auth/magic-link/consume
+     */
     public function consume(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -82,7 +104,6 @@ class MagicLinkController extends Controller
             return response()->json(['ok' => false, 'error' => 'expired'], 422);
         }
 
-        // Tandai dipakai (nanti di sini kita lanjut ke login/set password)
         $link->used_at = now();
         $link->save();
 
