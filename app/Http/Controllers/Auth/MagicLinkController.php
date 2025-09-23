@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\Auth\MagicLink;
+use App\Models\User; // <— add
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -104,6 +105,9 @@ class MagicLinkController extends Controller
 
     /**
      * POST /api/auth/magic-link/consume
+     * Body: { "token": "<64hex>" }
+     *
+     * NOTE: S-2 nanti kita ganti ke hash-compare. Sekarang masih plaintext kolom `token`.
      */
     public function consume(Request $request): JsonResponse
     {
@@ -111,6 +115,7 @@ class MagicLinkController extends Controller
             'token' => ['required', 'string', 'size:64'],
         ]);
 
+        // 1) Ambil link berdasarkan token (validations)
         $link = MagicLink::query()->where('token', $data['token'])->first();
 
         if (!$link) {
@@ -123,12 +128,33 @@ class MagicLinkController extends Controller
             return response()->json(['ok' => false, 'error' => 'expired'], 422);
         }
 
+        // 2) Tandai used
         $link->used_at = now();
         $link->save();
 
+        // 3) Pastikan user ada (firstOrCreate) — name default dari bagian sebelum '@'
+        $email = strtolower(trim($link->email));
+        $user = User::firstOrCreate(
+            ['email' => $email],
+            [
+                'name'     => Str::before($email, '@'),
+                // password random (tidak dipakai untuk login magic link)
+                'password' => Str::password(32),
+            ]
+        );
+
+        // 4) Issue Sanctum token (Bearer)
+        $token = $user->createToken('magic-link')->plainTextToken;
+
+        // 5) Response standar FE
         return response()->json([
             'ok'      => true,
-            'email'   => $link->email,
+            'token'   => $token,
+            'user'    => [
+                'id'    => $user->id,
+                'name'  => $user->name,
+                'email' => $user->email,
+            ],
             'purpose' => $link->purpose,
         ]);
     }
