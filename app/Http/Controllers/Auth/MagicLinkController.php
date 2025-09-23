@@ -43,7 +43,8 @@ class MagicLinkController extends Controller
             'email'      => $email,
             'token'      => $token,
             'purpose'    => $purpose,
-            'expires_at' => now()->addMinutes(30),
+            //'expires_at' => now()->addMinutes(30),
+            'expires_at' => now()->addMinutes((int) config('magiclink.ttl_minutes', 30)),
             'meta'       => ['ip' => $request->ip(), 'ua' => $request->userAgent()],
         ]);
 
