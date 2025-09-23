@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Log; // <— tambahkan ini
+use Illuminate\Support\Facades\Log;
 use Illuminate\Contracts\Mail\Mailable as MailableContract;
 use App\Mail\MagicLinkMail;
 
@@ -29,8 +29,8 @@ class MagicLinkController extends Controller
     public function request(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'email'   => ['required','string','email:rfc,dns','max:191'],
-            'purpose' => ['required', Rule::in(['signup','reset'])],
+            'email'   => ['required', 'string', 'email:rfc,dns', 'max:191'],
+            'purpose' => ['required', Rule::in(['signup', 'reset'])],
         ]);
 
         $email   = strtolower(trim($data['email']));
@@ -60,13 +60,31 @@ class MagicLinkController extends Controller
         $url  = $base . '/api/auth/magic-link/consume/' . $token;
 
         // Kirim email via mailer aktif (SES di prod, log di lokal)
-        if (filter_var(env('EMAIL_ENABLED', true), FILTER_VALIDATE_BOOL)) {
-            if (config('mail.default') === 'log') {
-                Log::info('Magic link URL (dev): ' . $url); // <— pakai Log::
+        $mailEnabled = filter_var(env('EMAIL_ENABLED', true), FILTER_VALIDATE_BOOL);
+        $driver      = (string) config('mail.default');
+
+        if ($mailEnabled) {
+            try {
+                if ($driver === 'log') {
+                    Log::info('Magic link URL (dev): ' . $url);
+                    error_log('[MAIL][dev-log] url=' . $url); // tampil di Railway
+                }
+
+                /** @var MailableContract $mailable */
+                $mailable = new MagicLinkMail($email, $purpose, $url);
+                Mail::to($email)->send($mailable);
+            } catch (\Throwable $e) {
+                // Tulis ke Laravel log & stderr supaya keliatan di Railway
+                $context = [
+                    'email'   => $email,
+                    'purpose' => $purpose,
+                    'driver'  => $driver,
+                    'error'   => $e->getMessage(),
+                ];
+                Log::error('[MAIL][send_failed]', $context);
+                error_log('[MAIL][send_failed] ' . json_encode($context));
+                // Jangan lempar error ke client → tetap 200
             }
-            /** @var MailableContract $mailable */
-            $mailable = new MagicLinkMail($email, $purpose, $url);
-            Mail::to($email)->send($mailable);
         }
 
         $payload = [
@@ -78,6 +96,7 @@ class MagicLinkController extends Controller
 
         if (app()->environment('local')) {
             $payload['dev_token'] = $token;
+            $payload['mailer']    = $driver;
         }
 
         return response()->json($payload);
@@ -89,7 +108,7 @@ class MagicLinkController extends Controller
     public function consume(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'token' => ['required','string','size:64'],
+            'token' => ['required', 'string', 'size:64'],
         ]);
 
         $link = MagicLink::query()->where('token', $data['token'])->first();
