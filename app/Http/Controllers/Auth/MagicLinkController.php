@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\Auth\MagicLink;
-use App\Models\User; // <— add
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -18,6 +18,8 @@ class MagicLinkController extends Controller
 {
     /**
      * Generator token 64 hex chars (tanpa random_bytes supaya linter adem).
+     * NOTE: Kita tetap generate "token" (plaintext yang dikirim via email),
+     *       tapi yang DISIMPAN di DB adalah hash(token) → token_hash.
      */
     private function makeToken(): string
     {
@@ -44,12 +46,15 @@ class MagicLinkController extends Controller
             ->whereNull('used_at')
             ->update(['used_at' => now()]);
 
-        $token = $this->makeToken();
+        // Generate plaintext token (64 hex) → hash → simpan hanya hash
+        $token      = $this->makeToken();
+        $token_hash = hash('sha256', $token);
 
         MagicLink::create([
             'id'         => (string) Str::uuid(), // UUID PK
             'email'      => $email,
-            'token'      => $token,
+            'token'      => null,                 // legacy off (tidak menyimpan plaintext)
+            'token_hash' => $token_hash,          // simpan hash
             'purpose'    => $purpose,
             'expires_at' => now()->addMinutes((int) config('magiclink.ttl_minutes', 30)),
             'meta'       => ['ip' => $request->ip(), 'ua' => $request->userAgent()],
@@ -68,14 +73,12 @@ class MagicLinkController extends Controller
             try {
                 if ($driver === 'log') {
                     Log::info('Magic link URL (dev): ' . $url);
-                    error_log('[MAIL][dev-log] url=' . $url); // tampil di Railway
+                    error_log('[MAIL][dev-log] url=' . $url);
                 }
-
                 /** @var MailableContract $mailable */
                 $mailable = new MagicLinkMail($email, $purpose, $url);
                 Mail::to($email)->send($mailable);
             } catch (\Throwable $e) {
-                // Tulis ke Laravel log & stderr supaya keliatan di Railway
                 $context = [
                     'email'   => $email,
                     'purpose' => $purpose,
@@ -84,7 +87,7 @@ class MagicLinkController extends Controller
                 ];
                 Log::error('[MAIL][send_failed]', $context);
                 error_log('[MAIL][send_failed] ' . json_encode($context));
-                // Jangan lempar error ke client → tetap 200
+                // tetap 200
             }
         }
 
@@ -96,6 +99,7 @@ class MagicLinkController extends Controller
         ];
 
         if (app()->environment('local')) {
+            // untuk dev only (jangan kirim ke prod)
             $payload['dev_token'] = $token;
             $payload['mailer']    = $driver;
         }
@@ -106,8 +110,6 @@ class MagicLinkController extends Controller
     /**
      * POST /api/auth/magic-link/consume
      * Body: { "token": "<64hex>" }
-     *
-     * NOTE: S-2 nanti kita ganti ke hash-compare. Sekarang masih plaintext kolom `token`.
      */
     public function consume(Request $request): JsonResponse
     {
@@ -115,8 +117,22 @@ class MagicLinkController extends Controller
             'token' => ['required', 'string', 'size:64'],
         ]);
 
-        // 1) Ambil link berdasarkan token (validations)
-        $link = MagicLink::query()->where('token', $data['token'])->first();
+        $provided = $data['token'];
+        $hash     = hash('sha256', $provided);
+
+        // 1) Cari berdasarkan token_hash
+        $link = MagicLink::query()->where('token_hash', $hash)->first();
+
+        // 1b) BACKWARD-COMPAT (sementara): kalau tidak ketemu, coba kolom legacy 'token'
+        if (!$link) {
+            $link = MagicLink::query()->where('token', $provided)->first();
+            if ($link) {
+                // konversi ke hash lalu kosongkan plaintext
+                $link->token_hash = $hash;
+                $link->token = null;
+                $link->save();
+            }
+        }
 
         if (!$link) {
             return response()->json(['ok' => false, 'error' => 'invalid_token'], 422);
@@ -132,21 +148,20 @@ class MagicLinkController extends Controller
         $link->used_at = now();
         $link->save();
 
-        // 3) Pastikan user ada (firstOrCreate) — name default dari bagian sebelum '@'
+        // 3) Buat/ambil user
         $email = strtolower(trim($link->email));
         $user = User::firstOrCreate(
             ['email' => $email],
             [
                 'name'     => Str::before($email, '@'),
-                // password random (tidak dipakai untuk login magic link)
-                'password' => Str::password(32),
+                'password' => Str::password(32), // random; tidak dipakai untuk magic-link
             ]
         );
 
         // 4) Issue Sanctum token (Bearer)
         $token = $user->createToken('magic-link')->plainTextToken;
 
-        // 5) Response standar FE
+        // 5) Response
         return response()->json([
             'ok'      => true,
             'token'   => $token,

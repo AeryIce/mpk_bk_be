@@ -2,22 +2,22 @@
 
 namespace App\Models\Auth;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 
 class MagicLink extends Model
 {
     use HasFactory;
 
-    // Tabel & PK (UUID)
     protected $table = 'magic_links';
-    public $incrementing = false;
     protected $keyType = 'string';
+    public $incrementing = false;
 
     protected $fillable = [
         'id',
         'email',
-        'token',
+        'token',       // legacy (akan di-null-kan)
+        'token_hash',  // new
         'purpose',
         'expires_at',
         'used_at',
