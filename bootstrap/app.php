@@ -5,6 +5,9 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Log;
+use App\Http\Middleware\EnsurePatIsNotExpired;
+use App\Http\Middleware\SecurityHeaders;
+use Illuminate\Http\Middleware\HandleCors;
 
 // DAFTARKAN PROVIDER KITA
 use App\Providers\AppServiceProvider;
@@ -20,7 +23,9 @@ return Application::configure(basePath: dirname(__DIR__))
         AppServiceProvider::class, // <— penting
     ])
     ->withMiddleware(function (Middleware $middleware) {
-        // (biarkan kosong / sesuai punyamu)
+        $middleware->alias(['pat.expires' => EnsurePatIsNotExpired::class,]);
+        $middleware->append(SecurityHeaders::class);
+        $middleware->append(HandleCors::class);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // 401 JSON untuk API

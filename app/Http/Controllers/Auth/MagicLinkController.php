@@ -15,12 +15,11 @@ use Illuminate\Contracts\Mail\Mailable as MailableContract;
 use App\Mail\MagicLinkMail;
 use Illuminate\Support\Facades\Cache;
 
-
 class MagicLinkController extends Controller
 {
     /**
      * Generator token 64 hex chars (tanpa random_bytes supaya linter adem).
-     * NOTE: Kita tetap generate "token" (plaintext yang dikirim via email),
+     * NOTE: Kita generate plaintext token (untuk dikirim ke user),
      *       tapi yang DISIMPAN di DB adalah hash(token) → token_hash.
      */
     private function makeToken(): string
@@ -40,8 +39,6 @@ class MagicLinkController extends Controller
 
         $email   = strtolower(trim($data['email']));
         $purpose = $data['purpose'];
-        $email   = strtolower(trim($data['email']));
-        $purpose = $data['purpose'];
 
         // === COOLDOWN 20s per email+IP ===
         $cooldown = (int) config('magiclink.cooldown_seconds', 20);
@@ -53,7 +50,6 @@ class MagicLinkController extends Controller
                 'message' => "Please wait {$cooldown}s before requesting another magic link.",
             ], 429);
         }
-        // set cooldown
         Cache::put($keyCd, 1, now()->addSeconds($cooldown));
 
         // Nonaktifkan token aktif sebelumnya untuk kombinasi email+purpose
@@ -130,11 +126,11 @@ class MagicLinkController extends Controller
      *
      * Catatan:
      * - Magic token 64-hex → ditukar jadi Sanctum PAT (Bearer).
-     * - Kalau kamu kirim PAT "4|...." ke sini, akan ditolak dengan pesan yang menjelaskan.
+     * - Kalau kamu kirim PAT "8|...." ke sini, akan ditolak dengan pesan yang menjelaskan.
      */
     public function consume(Request $request): JsonResponse
     {
-        // Deteksi keliru: kalau yang dikirim malah PAT "4|...."
+        // Deteksi keliru: kalau yang dikirim malah PAT "8|...."
         if (is_string($request->input('token')) && str_contains($request->input('token'), '|')) {
             return response()->json([
                 'ok' => false,
@@ -188,23 +184,35 @@ class MagicLinkController extends Controller
             ['email' => $email],
             [
                 'name'     => Str::before($email, '@'),
-                'password' => Str::password(32), // random; tidak dipakai untuk magic-link
+                'password' => Str::password(32), // random; diproses via cast 'hashed'
             ]
         );
 
-        // 4) Issue Sanctum token (Bearer)
-        $pat = $user->createToken('magic-link')->plainTextToken;
+        // 4) Issue Sanctum PAT + isi expiry & meta (IP/UA)
+        //    NOTE: Pastikan migration kolom expires_at, ip_address, user_agent sudah dijalankan.
+        $ttlHours  = (int) env('PAT_TTL_HOURS', 24);
+        $expiresAt = now()->addHours($ttlHours);
 
-        // 5) Response
+        $newToken = $user->createToken('magiclink', ['*']); // abilities opsional
+        $patModel = $newToken->accessToken;                 // \Laravel\Sanctum\PersonalAccessToken
+
+        // simpan meta & expiry
+        $patModel->expires_at = $expiresAt;
+        $patModel->ip_address = $request->ip();
+        $patModel->user_agent = (string) $request->userAgent();
+        $patModel->save();
+
+        // 5) Response → plainTextToken dipakai sebagai Bearer
         return response()->json([
             'ok'      => true,
-            'token'   => $pat, // ini PAT → pakai sebagai Authorization: Bearer
+            'token'   => $newToken->plainTextToken, // Bearer PAT
             'user'    => [
                 'id'    => $user->id,
                 'name'  => $user->name,
                 'email' => $user->email,
             ],
             'purpose' => $link->purpose,
+            'expires_at' => $expiresAt->toIso8601String(),
         ]);
     }
 }

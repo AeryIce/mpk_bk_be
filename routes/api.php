@@ -42,30 +42,30 @@ Route::prefix('auth')->group(function () {
 });
 
 /**
- * PROTECTED ROUTES (Sanctum Bearer)
+ * PROTECTED ROUTES (Sanctum Bearer + token-expiry check)
  */
-Route::middleware('auth:sanctum')->get('/me', function (Request $request) {
-    $u = $request->user();
-    if (!$u) {
-        return response()->json(['ok' => false, 'error' => 'unauthorized'], 401);
-    }
-    return response()->json([
-        'ok' => true,
-        'user' => [
-            'id' => $u->id,
-            'name' => $u->name,
-            'email' => $u->email,
-        ],
-    ]);
-})->name('auth.me');
+    Route::middleware(['auth:sanctum','pat.expires'])->get('/me', function (Request $request) {
+        $u = $request->user();
+        if (!$u) {
+            return response()->json(['ok' => false, 'error' => 'unauthorized'], 401);
+        }
+        return response()->json([
+            'ok' => true,
+            'user' => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'email' => $u->email,
+            ],
+        ]);
+    })->name('auth.me');
 
-Route::middleware('auth:sanctum')->post('/logout', function (Request $request) {
-    $token = $request->user()?->currentAccessToken();
-    if ($token) {
-        $token->delete();
-    }
-    return response()->json(['ok' => true]);
-})->name('auth.logout');
+    Route::middleware(['auth:sanctum','pat.expires'])->post('/logout', function (Request $request) {
+        $token = $request->user()?->currentAccessToken();
+        if ($token) {
+            $token->delete();
+        }
+        return response()->json(['ok' => true]);
+    })->name('auth.logout');
 
 /**
  * PROTECTED LOGS (Sanctum Bearer + ENV toggle + email whitelist)
