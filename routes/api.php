@@ -129,7 +129,7 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         }
     })->name('admin.logs.index');
 
-    // 2) View (path version) – aman untuk nama file dengan titik
+    // 2) View (path version)
     //    Contoh: GET /api/admin/logs/view/laravel.log?raw=1&bytes=131072
     Route::get('/view/{file}', function (string $file, Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
@@ -229,7 +229,7 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         ]);
     })->name('admin.logs.viewq');
 
-    // 4) Download file penuh
+    // 4) Download file penuh (path version)
     Route::get('/download/{file}', function (string $file, Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
         if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
@@ -251,4 +251,76 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 
         return response()->download($full, basename($full), ['Content-Type' => 'text/plain; charset=UTF-8']);
     })->where('file', '[A-Za-z0-9._-]+')->name('admin.logs.download');
+
+    // 5) Download (query version) – anti 404 karena .log di path
+    //    Contoh: GET /api/admin/logs/download?file=laravel-YYYY-MM-DD.log
+    Route::get('/download', function (Request $request) {
+        $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
+        if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
+
+        $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
+        $email   = strtolower((string) optional($request->user())->email);
+        $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
+        if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
+
+        $file = (string) $request->query('file', '');
+        if ($file === '') return response()->json(['ok' => false, 'error' => 'file_required'], 400);
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) {
+            return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        }
+
+        $base = realpath(storage_path('logs')) ?: storage_path('logs');
+        $full = realpath($base . DIRECTORY_SEPARATOR . $file);
+        if (!$full || strncmp($full, $base, strlen($base)) !== 0 || !is_file($full)) {
+            return response()->json(['ok' => false, 'error' => 'not_found'], 404);
+        }
+
+        return response()->download($full, basename($full), ['Content-Type' => 'text/plain; charset=UTF-8']);
+    })->name('admin.logs.downloadq');
+
+    // 6) Write test – paksa nulis 1 baris ke file log tanpa bergantung Facade
+    //    Contoh: POST /api/admin/logs/write-test
+    Route::post('/write-test', function (Request $request) {
+        try {
+            $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
+            if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
+
+            $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
+            $email   = strtolower((string) optional($request->user())->email);
+            $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
+            if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
+
+            $dir = storage_path('logs');
+            if (!is_dir($dir)) @mkdir($dir, 0775, true);
+            if (!is_dir($dir)) {
+                return response()->json(['ok' => false, 'error' => 'mkdir_failed', 'dir' => $dir], 500);
+            }
+
+            $channel = env('LOG_CHANNEL', 'daily');
+            $file = $channel === 'daily' ? 'laravel-'.date('Y-m-d').'.log' : 'laravel.log';
+            $full = $dir . DIRECTORY_SEPARATOR . $file;
+
+            $line = '['.date('Y-m-d H:i:s').'] local.INFO: [TEST][LOG] hello from log viewer'
+                  .' ip='.$request->ip().' ua='.($request->userAgent() ?? '-').PHP_EOL;
+
+            $ok = @file_put_contents($full, $line, FILE_APPEND);
+            if ($ok === false) {
+                return response()->json(['ok' => false, 'error' => 'write_failed', 'file' => $full], 500);
+            }
+
+            @error_log('[WRITE-TEST] wrote to '.$full);
+
+            return response()->json([
+                'ok'        => true,
+                'wrote'     => $line,
+                'file'      => basename($full),
+                'path'      => $full,
+                'size_now'  => @filesize($full) ?: null,
+                'channel'   => $channel,
+            ]);
+        } catch (\Throwable $e) {
+            @error_log('[LOGS][WRITE-TEST][500] '.$e->getMessage().' @'.$e->getFile().':'.$e->getLine());
+            return response()->json(['ok' => false, 'error' => 'server_error'], 500);
+        }
+    })->name('admin.logs.write-test');
 });
