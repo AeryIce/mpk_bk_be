@@ -110,24 +110,41 @@ class MagicLinkController extends Controller
     /**
      * POST /api/auth/magic-link/consume
      * Body: { "token": "<64hex>" }
+     *
+     * Catatan:
+     * - Magic token 64-hex → ditukar jadi Sanctum PAT (Bearer).
+     * - Kalau kamu kirim PAT "4|...." ke sini, akan ditolak dengan pesan yang menjelaskan.
      */
     public function consume(Request $request): JsonResponse
     {
+        // Deteksi keliru: kalau yang dikirim malah PAT "4|...."
+        if (is_string($request->input('token')) && str_contains($request->input('token'), '|')) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'looks_like_pat',
+                'message' => 'You sent a Personal Access Token. Use it as Authorization: Bearer <token> for /api/me or /api/logout, not in /consume.',
+            ], 422);
+        }
+
+        // Validasi magic token 64 hex (lowercase)
         $data = $request->validate([
-            'token' => ['required', 'string', 'size:64'],
+            'token' => ['required', 'string', 'size:64', 'regex:/^[a-f0-9]{64}$/'],
+        ], [
+            'token.size'  => 'Magic-link token must be exactly 64 hex characters.',
+            'token.regex' => 'Magic-link token must be a lowercase hex string (0-9 a-f).',
         ]);
 
         $provided = $data['token'];
         $hash     = hash('sha256', $provided);
 
-        // 1) Cari berdasarkan token_hash
+        // 1) Cari berdasarkan token_hash (skema baru)
         $link = MagicLink::query()->where('token_hash', $hash)->first();
 
-        // 1b) BACKWARD-COMPAT (sementara): kalau tidak ketemu, coba kolom legacy 'token'
+        // 1b) BACKWARD-COMPAT: kalau tidak ketemu, coba kolom legacy 'token'
         if (!$link) {
             $link = MagicLink::query()->where('token', $provided)->first();
             if ($link) {
-                // konversi ke hash lalu kosongkan plaintext
+                // migrasi satu-kali: isi hash & kosongkan plaintext
                 $link->token_hash = $hash;
                 $link->token = null;
                 $link->save();
@@ -159,12 +176,12 @@ class MagicLinkController extends Controller
         );
 
         // 4) Issue Sanctum token (Bearer)
-        $token = $user->createToken('magic-link')->plainTextToken;
+        $pat = $user->createToken('magic-link')->plainTextToken;
 
         // 5) Response
         return response()->json([
             'ok'      => true,
-            'token'   => $token,
+            'token'   => $pat, // ini PAT → pakai sebagai Authorization: Bearer
             'user'    => [
                 'id'    => $user->id,
                 'name'  => $user->name,
