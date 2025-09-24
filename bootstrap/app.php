@@ -4,13 +4,10 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Auth\AuthenticationException;
-use Illuminate\Support\Facades\Log;
+
 use App\Http\Middleware\EnsurePatIsNotExpired;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Http\Middleware\HandleCors;
-
-// DAFTARKAN PROVIDER KITA
-use App\Providers\AppServiceProvider;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -19,31 +16,25 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    ->withProviders([
-        AppServiceProvider::class, // <— penting
-    ])
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->alias(['pat.expires' => EnsurePatIsNotExpired::class,]);
-        $middleware->append(SecurityHeaders::class);
-        $middleware->append(HandleCors::class);
+        // **PENTING**: Jangan redirect tamu ke route('login') (karena tidak ada)
+        // Ini mencegah error "Route [login] not defined."
+        $middleware->redirectGuestsTo(fn () => null);
+
+        // Alias middleware kamu
+        $middleware->alias([
+            'pat.expires' => EnsurePatIsNotExpired::class,
+        ]);
+
+        // Global middlewares
+        $middleware->append(HandleCors::class);     // aktifkan CORS (config/cors.php)
+        $middleware->append(SecurityHeaders::class); // header keamanan OWASP baseline
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        // 401 JSON untuk API
+        // Pastikan request API tanpa bearer -> 401 JSON, bukan redirect/login
         $exceptions->renderable(function (AuthenticationException $e, $request) {
             if ($request->is('api/*')) {
                 return response()->json(['ok' => false, 'error' => 'unauthenticated'], 401);
-            }
-        });
-
-        // Fallback 500 JSON + log
-        $exceptions->renderable(function (\Throwable $e, $request) {
-            if ($request->is('api/*')) {
-                Log::error('[API][500] '.$e->getMessage(), [
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                ]);
-                error_log('[API][500] '.$e->getMessage().' {"file":"'.$e->getFile().'","line":'.$e->getLine().'}');
-                return response()->json(['ok' => false, 'error' => 'server_error'], 500);
             }
         });
     })
