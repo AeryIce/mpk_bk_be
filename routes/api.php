@@ -72,7 +72,7 @@ Route::middleware('auth:sanctum')->post('/logout', function (\Illuminate\Http\Re
 })->name('auth.logout');
 
 /**
- * PROTECTED LOGS (Sanctum Bearer,only for admins agahariiswarajati@gmail.com)
+ * PROTECTED LOGS (Sanctum Bearer,ENV Toggle ,only for admins agahariiswarajati@gmail.com)
  */
 
 Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {

@@ -3,34 +3,63 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\RateLimiter;
-
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
         //
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
-        RateLimiter::for('magiclink-email', function (Request $request) {
-        $email = strtolower((string) $request->input('email'));
-        $key = $email !== '' ? $email : $request->ip();
+            // === Limiter: request magic link (gabungan email + IP) ===
+            RateLimiter::for('magiclink-email', function (Request $request) {
+                $email = strtolower((string) $request->input('email', ''));
+                $ip    = (string) $request->ip();
+                $key   = 'ml:req:' . sha1($email . '|' . $ip);
 
-        return [
-            Limit::perMinute(3)->by($key), // max 3x per menit per email
-            Limit::perHour(20)->by($key),  // dan max 20x per jam per email
-        ];
-    });
+                return [
+                    tap(Limit::perMinute(3)->by($key))->response(function ($request, array $headers) {
+                        return response()->json([
+                            'ok' => false,
+                            'error' => 'too_many_requests_minute',
+                            'message' => 'Too many requests. Please wait a moment.',
+                        ], 429, $headers);
+                    }),
+                    tap(Limit::perHour(20)->by($key))->response(function ($request, array $headers) {
+                        return response()->json([
+                            'ok' => false,
+                            'error' => 'too_many_requests_hour',
+                            'message' => 'Too many requests in an hour. Please try again later.',
+                        ], 429, $headers);
+                    }),
+                ];
+            });
+
+            // === Limiter: consume magic link (berbasis IP) ===
+            RateLimiter::for('magiclink-consume', function (Request $request) {
+                $key = 'ml:consume:' . (string) $request->ip();
+
+                return [
+                    tap(Limit::perMinute(10)->by($key))->response(function ($request, array $headers) {
+                        return response()->json([
+                            'ok' => false,
+                            'error' => 'too_many_consume',
+                            'message' => 'Too many consume attempts. Please slow down.',
+                        ], 429, $headers);
+                    }),
+                    tap(Limit::perHour(100)->by($key))->response(function ($request, array $headers) {
+                        return response()->json([
+                            'ok' => false,
+                            'error' => 'too_many_consume_hour',
+                            'message' => 'Too many consume attempts this hour.',
+                        ], 429, $headers);
+                    }),
+                ];
+            });
     }
 }
