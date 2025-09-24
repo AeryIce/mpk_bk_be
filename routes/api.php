@@ -24,21 +24,21 @@ Route::prefix('auth')->group(function () {
     ]))->name('auth.ping');
 
     // Request magic link (rate limit pakai key khusus dari AppServiceProvider)
+  // GANTI limiter: magiclink-email
     Route::post('/magic-link/request', [MagicLinkController::class, 'request'])
         ->middleware('throttle:magiclink-email')
         ->name('auth.magiclink.request');
 
-    // Consume by POST (FE hit dengan body token)
+    // GANTI limiter: magiclink-consume
     Route::post('/magic-link/consume', [MagicLinkController::class, 'consume'])
-        ->middleware('throttle:10,1')
+        ->middleware('throttle:magiclink-consume')
         ->name('auth.magiclink.consume');
 
-    // Consume by GET (klik link dari email, token via path param)
     Route::get('/magic-link/consume/{token}', function (string $token, Request $r) {
         $request = $r->merge(['token' => $token]);
         return app(MagicLinkController::class)->consume($request);
     })
-        ->middleware('throttle:10,1')
+        ->middleware('throttle:magiclink-consume')
         ->name('auth.magiclink.consume.get');
 });
 

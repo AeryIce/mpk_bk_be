@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Contracts\Mail\Mailable as MailableContract;
 use App\Mail\MagicLinkMail;
+use Illuminate\Support\Facades\Cache;
+
 
 class MagicLinkController extends Controller
 {
@@ -38,6 +40,21 @@ class MagicLinkController extends Controller
 
         $email   = strtolower(trim($data['email']));
         $purpose = $data['purpose'];
+        $email   = strtolower(trim($data['email']));
+        $purpose = $data['purpose'];
+
+        // === COOLDOWN 20s per email+IP ===
+        $cooldown = (int) config('magiclink.cooldown_seconds', 20);
+        $keyCd = 'ml:cd:' . sha1($email.'|'.$request->ip());
+        if (Cache::has($keyCd)) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'cooldown_active',
+                'message' => "Please wait {$cooldown}s before requesting another magic link.",
+            ], 429);
+        }
+        // set cooldown
+        Cache::put($keyCd, 1, now()->addSeconds($cooldown));
 
         // Nonaktifkan token aktif sebelumnya untuk kombinasi email+purpose
         MagicLink::query()
