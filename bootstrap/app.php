@@ -3,31 +3,37 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Auth\AuthenticationException; 
+use Illuminate\Auth\AuthenticationException;
+
+// ADD imports for rate limiting
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log; 
+
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
-        api: __DIR__.'/../routes/api.php', 
+        api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
     ->withProviders([
-      
+        //
     ])
     ->withMiddleware(function (Middleware $middleware) {
-        // ======== S-3: RATE LIMITERS ========
+        /**
+         * ======== S-3: RATE LIMITERS ========
+         * Note: definisikan DI SINI supaya alias throttle:magiclink-* dikenal.
+         */
 
-        // 3.1 — limiter untuk REQUEST magic link (gabung email + IP)
+        // 3.1 — limiter untuk REQUEST magic link (gabungan email+IP)
         RateLimiter::for('magiclink-email', function (Request $request) {
             $email = strtolower((string) $request->input('email', ''));
             $ip    = (string) $request->ip();
             $key   = 'ml:req:' . sha1($email . '|' . $ip);
 
-            $limits = [
-                // Maks 3/min untuk kombinasi email+IP
+            return [
                 tap(Limit::perMinute(3)->by($key))->response(function ($request, array $headers) {
                     return response()->json([
                         'ok' => false,
@@ -35,8 +41,6 @@ return Application::configure(basePath: dirname(__DIR__))
                         'message' => 'Too many requests. Please wait a moment.',
                     ], 429, $headers);
                 }),
-
-                // Maks 20/jam untuk kombinasi email+IP
                 tap(Limit::perHour(20)->by($key))->response(function ($request, array $headers) {
                     return response()->json([
                         'ok' => false,
@@ -45,8 +49,6 @@ return Application::configure(basePath: dirname(__DIR__))
                     ], 429, $headers);
                 }),
             ];
-
-            return $limits;
         });
 
         // 3.2 — limiter untuk CONSUME (berbasis IP)
@@ -70,16 +72,22 @@ return Application::configure(basePath: dirname(__DIR__))
                 }),
             ];
         });
-
     })
     ->withExceptions(function (Exceptions $exceptions) {
-          // === ADD: paksa API balas JSON 401, bukan 500/redirect ===
+        // 401 JSON untuk API
         $exceptions->renderable(function (AuthenticationException $e, $request) {
             if ($request->is('api/*')) {
                 return response()->json(['ok' => false, 'error' => 'unauthenticated'], 401);
             }
         });
 
-        // Kamu bisa tambah handler lain di sini nanti kalau perlu
-    
-    })->create();
+        // Fallback 500 JSON + log
+        $exceptions->renderable(function (\Throwable $e, $request) {
+            if ($request->is('api/*')) {
+                Log::error('[API][500] '.$e->getMessage(), ['file' => $e->getFile(), 'line' => $e->getLine()]);
+                error_log('[API][500] '.$e->getMessage().' {"file":"'.$e->getFile().'","line":'.$e->getLine().'}');
+                return response()->json(['ok' => false, 'error' => 'server_error'], 500);
+            }
+        });
+    })
+    ->create();
