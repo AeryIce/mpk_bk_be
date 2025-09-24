@@ -4,8 +4,8 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Auth\MagicLinkController;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -24,13 +24,11 @@ Route::prefix('auth')->group(function () {
         'time' => now()->toIso8601String(),
     ]))->name('auth.ping');
 
-    // Request magic link (rate limit pakai key khusus dari AppServiceProvider)
-  // GANTI limiter: magiclink-email
+    // Rate limiter pakai alias yang didefinisikan di AppServiceProvider
     Route::post('/magic-link/request', [MagicLinkController::class, 'request'])
         ->middleware('throttle:magiclink-email')
         ->name('auth.magiclink.request');
 
-    // GANTI limiter: magiclink-consume
     Route::post('/magic-link/consume', [MagicLinkController::class, 'consume'])
         ->middleware('throttle:magiclink-consume')
         ->name('auth.magiclink.consume');
@@ -46,13 +44,11 @@ Route::prefix('auth')->group(function () {
 /**
  * PROTECTED ROUTES (Sanctum Bearer)
  */
-Route::middleware('auth:sanctum')->get('/me', function (\Illuminate\Http\Request $request) {
+Route::middleware('auth:sanctum')->get('/me', function (Request $request) {
     $u = $request->user();
     if (!$u) {
-        // fallback defensif: kalau middleware lolos tapi user null, balikin 401
         return response()->json(['ok' => false, 'error' => 'unauthorized'], 401);
     }
-
     return response()->json([
         'ok' => true,
         'user' => [
@@ -63,7 +59,7 @@ Route::middleware('auth:sanctum')->get('/me', function (\Illuminate\Http\Request
     ]);
 })->name('auth.me');
 
-Route::middleware('auth:sanctum')->post('/logout', function (\Illuminate\Http\Request $request) {
+Route::middleware('auth:sanctum')->post('/logout', function (Request $request) {
     $token = $request->user()?->currentAccessToken();
     if ($token) {
         $token->delete();
@@ -72,56 +68,31 @@ Route::middleware('auth:sanctum')->post('/logout', function (\Illuminate\Http\Re
 })->name('auth.logout');
 
 /**
- * PROTECTED LOGS (Sanctum Bearer,ENV Toggle ,only for admins agahariiswarajati@gmail.com)
+ * PROTECTED LOGS (Sanctum Bearer + ENV toggle + email whitelist)
+ * .env:
+ *   LOG_VIEWER_ENABLED=true
+ *   LOG_VIEWER_EMAILS=agahariiswarajati@gmail.com
  */
-
 Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 
-    // GET /api/admin/logs  -> list file log
+    // 0) Ping – cepat cek enable & whitelist
+    Route::get('/ping', function (Request $request) {
+        $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
+        $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
+        $email   = strtolower((string) optional($request->user())->email);
+        $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
+
+        return response()->json([
+            'ok' => $enabled && $okEmail,
+            'enabled' => $enabled,
+            'email' => $email,
+            'whitelisted' => $okEmail,
+        ], ($enabled && $okEmail) ? 200 : 403);
+    })->name('admin.logs.ping');
+
+    // 1) List file log
     Route::get('/', function (Request $request) {
         try {
-            $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
-            if (!$enabled) {
-                return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
-            }
-
-            $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
-            $email   = strtolower((string) optional($request->user())->email);
-            $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
-            if (!$okEmail) {
-                return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
-            }
-
-            $base = storage_path('logs');
-            if (!is_dir($base)) {
-                return response()->json(['ok' => true, 'path' => $base, 'files' => []]);
-            }
-
-            // Ambil daftar file dengan glob (lebih kebal dari File::files)
-            $paths = glob($base . DIRECTORY_SEPARATOR . '*');
-            $files = [];
-            foreach ($paths as $p) {
-                if (is_file($p)) {
-                    $files[] = [
-                        'name'        => basename($p),
-                        'size_bytes'  => @filesize($p) ?: 0,
-                        'modified_at' => date('c', @filemtime($p) ?: time()),
-                    ];
-                }
-            }
-            // sort desc by modified_at
-            usort($files, fn($a, $b) => strcmp($b['modified_at'], $a['modified_at']));
-
-            return response()->json(['ok' => true, 'path' => $base, 'files' => array_values($files)]);
-        } catch (\Throwable $e) {
-            Log::error('[LOGS][INDEX][500] '.$e->getMessage(), ['file'=>$e->getFile(),'line'=>$e->getLine()]);
-            return response()->json(['ok' => false, 'error' => 'server_error'], 500);
-        }
-    })->name('admin.logs.index');
-
-    // GET /api/admin/logs/view/{file}?bytes=65536&raw=0
-    Route::get('/view/{file}', function (string $file, Request $request) {
-        return (function () use ($file, $request) {
             $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
             if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
 
@@ -130,60 +101,135 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
             $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
             if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
 
-            if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) {
-                return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+            $base = storage_path('logs');
+            if (!is_dir($base)) {
+                return response()->json(['ok' => true, 'path' => $base, 'files' => []]);
             }
 
-            $base = realpath(storage_path('logs')) ?: storage_path('logs');
-            $full = realpath($base . DIRECTORY_SEPARATOR . $file);
-            if (!$full || strncmp($full, $base, strlen($base)) !== 0 || !is_file($full)) {
-                return response()->json(['ok' => false, 'error' => 'not_found'], 404);
+            $names = @scandir($base) ?: [];
+            $files = [];
+            foreach ($names as $name) {
+                if ($name === '.' || $name === '..') continue;
+                if (!preg_match('/^[A-Za-z0-9._-]+$/', $name)) continue;
+                $full = $base . DIRECTORY_SEPARATOR . $name;
+                if (is_file($full)) {
+                    $files[] = [
+                        'name'        => $name,
+                        'size_bytes'  => @filesize($full) ?: 0,
+                        'modified_at' => date('c', @filemtime($full) ?: time()),
+                    ];
+                }
             }
+            usort($files, fn($a, $b) => strcmp($b['modified_at'], $a['modified_at']));
 
-            $bytes = (int) $request->query('bytes', 65536);
-            $bytes = max(1024, min($bytes, 2 * 1024 * 1024));
-            $size  = @filesize($full) ?: 0;
-            $start = $size > $bytes ? $size - $bytes : 0;
+            return response()->json(['ok' => true, 'path' => $base, 'files' => array_values($files)]);
+        } catch (\Throwable $e) {
+            Log::error('[LOGS][INDEX][500] '.$e->getMessage(), ['file' => $e->getFile(), 'line' => $e->getLine()]);
+            return response()->json(['ok' => false, 'error' => 'server_error'], 500);
+        }
+    })->name('admin.logs.index');
 
-            $fh = @fopen($full, 'rb');
-            if ($fh === false) return response()->json(['ok' => false, 'error' => 'cannot_open'], 500);
-            if ($start > 0) @fseek($fh, $start);
-            $content = @stream_get_contents($fh) ?: '';
-            @fclose($fh);
+    // 2) View (path version) – aman untuk nama file dengan titik
+    //    Contoh: GET /api/admin/logs/view/laravel.log?raw=1&bytes=131072
+    Route::get('/view/{file}', function (string $file, Request $request) {
+        $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
+        if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
 
-            if ($request->boolean('raw')) {
-                return response($content, 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
-            }
+        $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
+        $email   = strtolower((string) optional($request->user())->email);
+        $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
+        if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
 
-            return response()->json([
-                'ok'          => true,
-                'file'        => basename($full),
-                'size_bytes'  => $size,
-                'start'       => $start,
-                'end'         => $size,
-                'bytes_read'  => strlen($content),
-                'truncated'   => $start > 0,
-                'modified_at' => date('c', @filemtime($full) ?: time()),
-                'content'     => $content,
-            ]);
-        })();
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) {
+            return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        }
+
+        $base = realpath(storage_path('logs')) ?: storage_path('logs');
+        $full = realpath($base . DIRECTORY_SEPARATOR . $file);
+        if (!$full || strncmp($full, $base, strlen($base)) !== 0 || !is_file($full)) {
+            return response()->json(['ok' => false, 'error' => 'not_found'], 404);
+        }
+
+        $bytes = (int) $request->query('bytes', 65536);
+        $bytes = max(1024, min($bytes, 2 * 1024 * 1024));
+        $size  = @filesize($full) ?: 0;
+        $start = $size > $bytes ? $size - $bytes : 0;
+
+        $fh = @fopen($full, 'rb');
+        if ($fh === false) return response()->json(['ok' => false, 'error' => 'cannot_open'], 500);
+        if ($start > 0) @fseek($fh, $start);
+        $content = @stream_get_contents($fh) ?: '';
+        @fclose($fh);
+
+        if ($request->boolean('raw')) {
+            return response($content, 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
+        }
+
+        return response()->json([
+            'ok'          => true,
+            'file'        => basename($full),
+            'size_bytes'  => $size,
+            'start'       => $start,
+            'end'         => $size,
+            'bytes_read'  => strlen($content),
+            'truncated'   => $start > 0,
+            'modified_at' => date('c', @filemtime($full) ?: time()),
+            'content'     => $content,
+        ]);
     })->where('file', '[A-Za-z0-9._-]+')->name('admin.logs.view');
 
-    // GET /api/admin/logs/view?file=laravel.log&bytes=65536&raw=1  (query version — aman di browser)
+    // 3) View (query version) – enak buat Postman/Browser
+    //    Contoh: GET /api/admin/logs/view?file=laravel.log&raw=1&bytes=131072
     Route::get('/view', function (Request $request) {
+        $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
+        if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
+
+        $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
+        $email   = strtolower((string) optional($request->user())->email);
+        $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
+        if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
+
         $file = (string) $request->query('file', '');
-        if ($file === '') {
-            return response()->json(['ok' => false, 'error' => 'file_required'], 400);
+        if ($file === '') return response()->json(['ok' => false, 'error' => 'file_required'], 400);
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) {
+            return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
         }
-        // reuse handler di atas
-        return app('router')->dispatch(Request::create(
-            url()->route('admin.logs.view', ['file' => $file], false),
-            'GET',
-            $request->query()
-        ));
+
+        $base = realpath(storage_path('logs')) ?: storage_path('logs');
+        $full = realpath($base . DIRECTORY_SEPARATOR . $file);
+        if (!$full || strncmp($full, $base, strlen($base)) !== 0 || !is_file($full)) {
+            return response()->json(['ok' => false, 'error' => 'not_found'], 404);
+        }
+
+        $bytes = (int) $request->query('bytes', 65536);
+        $bytes = max(1024, min($bytes, 2 * 1024 * 1024));
+        $size  = @filesize($full) ?: 0;
+        $start = $size > $bytes ? $size - $bytes : 0;
+
+        $fh = @fopen($full, 'rb');
+        if ($fh === false) return response()->json(['ok' => false, 'error' => 'cannot_open'], 500);
+        if ($start > 0) @fseek($fh, $start);
+        $content = @stream_get_contents($fh) ?: '';
+        @fclose($fh);
+
+        if ($request->boolean('raw')) {
+            return response($content, 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
+        }
+
+        return response()->json([
+            'ok'          => true,
+            'file'        => basename($full),
+            'size_bytes'  => $size,
+            'start'       => $start,
+            'end'         => $size,
+            'bytes_read'  => strlen($content),
+            'truncated'   => $start > 0,
+            'modified_at' => date('c', @filemtime($full) ?: time()),
+            'content'     => $content,
+        ]);
     })->name('admin.logs.viewq');
 
-    // GET /api/admin/logs/download/{file}
+    // 4) Download file penuh
     Route::get('/download/{file}', function (string $file, Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
         if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
@@ -206,7 +252,3 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         return response()->download($full, basename($full), ['Content-Type' => 'text/plain; charset=UTF-8']);
     })->where('file', '[A-Za-z0-9._-]+')->name('admin.logs.download');
 });
-
-  
-
-
