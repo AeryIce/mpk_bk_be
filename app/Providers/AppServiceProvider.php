@@ -3,8 +3,8 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Http\Request;
 
 class AppServiceProvider extends ServiceProvider
@@ -16,50 +16,42 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-            // === Limiter: request magic link (gabungan email + IP) ===
-            RateLimiter::for('magiclink-email', function (Request $request) {
-                $email = strtolower((string) $request->input('email', ''));
-                $ip    = (string) $request->ip();
-                $key   = 'ml:req:' . sha1($email . '|' . $ip);
+        // Limit request email (POST /auth/magic-link/request)
+        // Kunci by email+IP. Default: 3 per menit.
+        RateLimiter::for('magiclink-email', function (Request $request) {
+            $email = strtolower((string) $request->input('email', ''));
+            $ip    = $request->ip();
+            $key   = 'ml:req:' . sha1($email.'|'.$ip);
 
-                return [
-                    tap(Limit::perMinute(3)->by($key))->response(function ($request, array $headers) {
-                        return response()->json([
-                            'ok' => false,
-                            'error' => 'too_many_requests_minute',
-                            'message' => 'Too many requests. Please wait a moment.',
-                        ], 429, $headers);
-                    }),
-                    tap(Limit::perHour(20)->by($key))->response(function ($request, array $headers) {
-                        return response()->json([
-                            'ok' => false,
-                            'error' => 'too_many_requests_hour',
-                            'message' => 'Too many requests in an hour. Please try again later.',
-                        ], 429, $headers);
-                    }),
-                ];
+            $perMin = (int) env('RL_MAGIC_EMAIL_PER_MIN', 3);
+
+            return Limit::perMinute($perMin)->by($key)->response(function () use ($perMin) {
+                return response()->json([
+                    'ok'      => false,
+                    'error'   => 'too_many_requests',
+                    'message' => "Too many magic link requests. Try again later.",
+                ], 429);
             });
+        });
 
-            // === Limiter: consume magic link (berbasis IP) ===
-            RateLimiter::for('magiclink-consume', function (Request $request) {
-                $key = 'ml:consume:' . (string) $request->ip();
+        // Limit consume (POST/GET /auth/magic-link/consume)
+        // Kunci by IP. Default: 10 per menit.
+        RateLimiter::for('magiclink-consume', function (Request $request) {
+            $ip     = $request->ip();
+            $perMin = (int) env('RL_MAGIC_CONSUME_PER_MIN', 10);
 
-                return [
-                    tap(Limit::perMinute(10)->by($key))->response(function ($request, array $headers) {
-                        return response()->json([
-                            'ok' => false,
-                            'error' => 'too_many_consume',
-                            'message' => 'Too many consume attempts. Please slow down.',
-                        ], 429, $headers);
-                    }),
-                    tap(Limit::perHour(100)->by($key))->response(function ($request, array $headers) {
-                        return response()->json([
-                            'ok' => false,
-                            'error' => 'too_many_consume_hour',
-                            'message' => 'Too many consume attempts this hour.',
-                        ], 429, $headers);
-                    }),
-                ];
+            return Limit::perMinute($perMin)->by('ml:consume:' . $ip)->response(function () {
+                return response()->json([
+                    'ok'    => false,
+                    'error' => 'too_many_requests',
+                ], 429);
             });
+        });
+
+        // (Opsional) limiter untuk log viewer, kunci by IP. Default 60/min.
+        RateLimiter::for('admin-logs', function (Request $request) {
+            $perMin = (int) env('RL_ADMIN_LOGS_PER_MIN', 60);
+            return Limit::perMinute($perMin)->by('logs:' . $request->ip());
+        });
     }
 }

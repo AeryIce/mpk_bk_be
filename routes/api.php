@@ -5,7 +5,7 @@ use Illuminate\Http\Request;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Auth\MagicLinkController;
 use Illuminate\Support\Facades\Log;
-
+use Illuminate\Support\Facades\Schedule;
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -324,3 +324,6 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         }
     })->name('admin.logs.write-test');
 });
+
+// Prune token kedaluwarsa tiap 02:30 UTC
+Schedule::command('pat:prune')->dailyAt('02:30');
