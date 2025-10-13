@@ -9,21 +9,18 @@ class SecurityHeaders
 {
     public function handle(Request $request, Closure $next)
     {
-        $resp = $next($request);
+        $response = $next($request);
 
-        // Basic hardening untuk API
-        $resp->headers->set('X-Content-Type-Options', 'nosniff');
-        $resp->headers->set('Referrer-Policy', 'no-referrer');
-        $resp->headers->set('X-Frame-Options', 'DENY');
+        $response->headers->set('X-Frame-Options', 'SAMEORIGIN');
+        $response->headers->set('X-Content-Type-Options', 'nosniff');
+        $response->headers->set('Referrer-Policy', 'no-referrer-when-downgrade');
+        $response->headers->set('Permissions-Policy', "camera=(), geolocation=(), microphone=()");
 
-        // CSP minimal untuk API (tidak render konten)
-        $resp->headers->set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
-
-        // HSTS hanya di production + HTTPS
-        if (app()->isProduction() && $request->isSecure()) {
-            $resp->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+        // HSTS hanya di production & https
+        if (app()->environment('production') && $request->isSecure()) {
+            $response->headers->set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
         }
 
-        return $resp;
+        return $response;
     }
 }

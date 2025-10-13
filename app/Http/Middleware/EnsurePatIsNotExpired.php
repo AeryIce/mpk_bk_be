@@ -7,19 +7,17 @@ use Illuminate\Http\Request;
 
 class EnsurePatIsNotExpired
 {
+    /**
+     * Cek masa berlaku Personal Access Token (Sanctum).
+     * Jika token punya kolom expires_at dan sudah lewat → 401.
+     * Jika tidak ada expires_at, lepasin (dev/demo).
+     */
     public function handle(Request $request, Closure $next)
     {
-        $token = $request->user()?->currentAccessToken();
+        $user = $request->user();
+        $token = $user?->currentAccessToken();
 
-        // Kalau ternyata tidak ada token aktif, biarkan auth:sanctum yang handle (401)
-        if (!$token) {
-            return $next($request);
-        }
-
-        // Jika token punya expiry dan sudah lewat → hapus & balas 401 khusus
-        if ($token->expires_at && now()->greaterThan($token->expires_at)) {
-            // opsional: hapus token supaya benar-benar tak bisa dipakai lagi
-            try { $token->delete(); } catch (\Throwable $e) {}
+        if ($token && $token->expires_at && now()->greaterThan($token->expires_at)) {
             return response()->json(['ok' => false, 'error' => 'token_expired'], 401);
         }
 
