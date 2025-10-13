@@ -327,3 +327,13 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 
 // Prune token kedaluwarsa tiap 02:30 UTC
 Schedule::command('pat:prune')->dailyAt('02:30');
+
+Route::middleware('auth:sanctum')->get('/me', function (Request $r) {
+  $u = $r->user();
+  return ['ok'=>true,'user'=>['id'=>$u->id,'name'=>$u->name,'email'=>$u->email,'role'=>$u->role]];
+});
+
+Route::middleware(['auth:sanctum','role:admin,superadmin'])
+    ->prefix('admin')->group(function () {
+        Route::get('/ping', fn() => ['ok'=>true,'area'=>'admin']);
+    });
