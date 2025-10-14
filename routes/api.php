@@ -7,6 +7,7 @@ use App\Http\Controllers\Auth\MagicLinkController;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 use App\Http\Controllers\Api\RegistrationController;
+use App\Models\Registration;
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -345,3 +346,27 @@ Route::middleware('throttle:20,1')->post('/registrations', [RegistrationControll
 // admin list (butuh auth + role)
 // Route::middleware(['auth:sanctum','role:admin,superadmin'])
 //     ->get('/registrations', [RegistrationController::class, 'index']);
+
+// ——— TAMBAHKAN INI: list data untuk FE/admin ———
+Route::middleware('throttle:30,1')->get('/registrations-list', function (Request $r) {
+    $q = trim((string) $r->query('q', ''));
+
+    $rows = Registration::query()
+        ->when($q !== '', function ($w) use ($q) {
+            $w->where('instansi', 'like', "%$q%")
+              ->orWhere('pic', 'like', "%$q%")
+              ->orWhere('email', 'like', "%$q%")
+              ->orWhere('wa', 'like', "%$q%")
+              ->orWhere('kota', 'like', "%$q%")
+              ->orWhere('provinsi', 'like', "%$q%");
+        })
+        ->orderByDesc('id')
+        ->limit(200)
+        ->get([
+            'id','instansi','pic','jabatan','email','wa','alamat',
+            'kelurahan','kecamatan','kota','provinsi','kodepos',
+            'lat','lng','catatan','created_at'
+        ]);
+
+    return ['ok' => true, 'data' => $rows];
+});
