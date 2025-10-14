@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Auth\MagicLinkController;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
+use App\Http\Controllers\Api\RegistrationController;
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -337,3 +338,10 @@ Route::middleware(['auth:sanctum','role:admin,superadmin'])
     ->prefix('admin')->group(function () {
         Route::get('/ping', fn() => ['ok'=>true,'area'=>'admin']);
     });
+
+// publik (rate-limit biar aman)
+Route::middleware('throttle:20,1')->post('/registrations', [RegistrationController::class, 'store']);
+
+// admin list (butuh auth + role)
+Route::middleware(['auth:sanctum','role:admin,superadmin'])
+    ->get('/registrations', [RegistrationController::class, 'index']);
