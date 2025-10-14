@@ -334,14 +334,14 @@ Route::middleware('auth:sanctum')->get('/me', function (Request $r) {
   return ['ok'=>true,'user'=>['id'=>$u->id,'name'=>$u->name,'email'=>$u->email,'role'=>$u->role]];
 });
 
-Route::middleware(['auth:sanctum','role:admin,superadmin'])
-    ->prefix('admin')->group(function () {
-        Route::get('/ping', fn() => ['ok'=>true,'area'=>'admin']);
-    });
+// Route::middleware(['auth:sanctum','role:admin,superadmin'])
+//     ->prefix('admin')->group(function () {
+//         Route::get('/ping', fn() => ['ok'=>true,'area'=>'admin']);
+//     });
 
 // publik (rate-limit biar aman)
 Route::middleware('throttle:20,1')->post('/registrations', [RegistrationController::class, 'store']);
 
 // admin list (butuh auth + role)
-Route::middleware(['auth:sanctum','role:admin,superadmin'])
-    ->get('/registrations', [RegistrationController::class, 'index']);
+// Route::middleware(['auth:sanctum','role:admin,superadmin'])
+//     ->get('/registrations', [RegistrationController::class, 'index']);
