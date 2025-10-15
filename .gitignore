@@ -21,3 +21,8 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+/app/generated/prisma
+
+# tambahkan ke .gitignore (kalau belum)
+echo -e "\n# master data excel (jangan commit)\nstorage/app/master/*.xlsx\nstorage/app/master/*.xls\ndata_src/\n" >> .gitignore

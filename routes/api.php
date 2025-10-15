@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 use App\Http\Controllers\Api\RegistrationController;
 use App\Models\Registration;
+use App\Http\Controllers\MasterController;
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -370,3 +371,8 @@ Route::middleware('throttle:30,1')->get('/registrations-list', function (Request
 
     return ['ok' => true, 'data' => $rows];
 });
+
+
+
+Route::get('/master/yayasan', [MasterController::class, 'yayasan']);
+Route::get('/master/sekolah', [MasterController::class, 'sekolah']);

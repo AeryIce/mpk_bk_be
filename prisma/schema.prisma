@@ -1,0 +1,33 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Yayasan {
+  id        String    @id
+  name      String
+  sekolah   Sekolah[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Sekolah {
+  id         String   @id        // pakai NPSN; kalau kosong kita isi fallback id stabil
+  yayasanId  String
+  yayasan    Yayasan  @relation(fields: [yayasanId], references: [id], onDelete: Cascade)
+  name       String
+  jenjang    String?
+  kecamatan  String?
+  kabupaten  String?
+  provinsi   String?
+  npsn       String?  @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([yayasanId], map: "idx_sekolah_yayasan")
+  @@index([name], map: "idx_sekolah_name")
+}
