@@ -378,3 +378,4 @@ Route::middleware('throttle:30,1')->get('/registrations-list', function (Request
 // Master data for FE (tetap sesuai Controller yang ada)
 Route::get('/master/yayasan', [MasterController::class, 'yayasan']);
 Route::get('/master/sekolah', [MasterController::class, 'sekolah']);
+Route::get('/master/perusahaan', [MasterController::class, 'perusahaan']);

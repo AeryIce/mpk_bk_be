@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Yayasan;
 use App\Models\Sekolah;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class MasterController extends Controller
 {
@@ -44,4 +45,35 @@ class MasterController extends Controller
 
         return response()->json($rows);
     }
+    public function perusahaan(\Illuminate\Http\Request $r)
+        {
+            $q     = trim((string) $r->query('q', ''));
+            $limit = (int) $r->query('limit', 50);
+            $limit = max(1, min($limit, 500));
+
+            // Pakai query builder supaya gampang cast id -> string (FE tipenya string)
+            $rows = DB::table('master_perusahaan')
+                ->when($q !== '', function ($w) use ($q) {
+                    // Postgres ILIKE; kalau MySQL otomatis jadi LIKE case-insensitive (collation)
+                    $driver = DB::getDriverName();
+                    if ($driver === 'pgsql') {
+                        $w->where('name', 'ILIKE', "%{$q}%");
+                    } else {
+                        $w->where('name', 'like', "%{$q}%");
+                    }
+                })
+                ->orderBy('name')
+                ->limit($limit)
+                ->get(['id', 'name'])
+                ->map(function ($r) {
+                    return [
+                        'id'   => (string) $r->id, // pastikan string untuk FE
+                        'name' => $r->name,
+                    ];
+                })
+                ->values();
+
+            return response()->json($rows);
+        }
+
 }
