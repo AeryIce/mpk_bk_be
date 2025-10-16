@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Schedule;
 use App\Http\Controllers\Api\RegistrationController;
 use App\Models\Registration;
 use App\Http\Controllers\MasterController;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -47,28 +48,28 @@ Route::prefix('auth')->group(function () {
 /**
  * PROTECTED ROUTES (Sanctum Bearer + token-expiry check)
  */
-    Route::middleware(['auth:sanctum','pat.expires'])->get('/me', function (Request $request) {
-        $u = $request->user();
-        if (!$u) {
-            return response()->json(['ok' => false, 'error' => 'unauthorized'], 401);
-        }
-        return response()->json([
-            'ok' => true,
-            'user' => [
-                'id' => $u->id,
-                'name' => $u->name,
-                'email' => $u->email,
-            ],
-        ]);
-    })->name('auth.me');
+Route::middleware(['auth:sanctum','pat.expires'])->get('/me', function (Request $request) {
+    $u = $request->user();
+    if (!$u) {
+        return response()->json(['ok' => false, 'error' => 'unauthorized'], 401);
+    }
+    return response()->json([
+        'ok' => true,
+        'user' => [
+            'id' => $u->id,
+            'name' => $u->name,
+            'email' => $u->email,
+        ],
+    ]);
+})->name('auth.me');
 
-    Route::middleware(['auth:sanctum','pat.expires'])->post('/logout', function (Request $request) {
-        $token = $request->user()?->currentAccessToken();
-        if ($token) {
-            $token->delete();
-        }
-        return response()->json(['ok' => true]);
-    })->name('auth.logout');
+Route::middleware(['auth:sanctum','pat.expires'])->post('/logout', function (Request $request) {
+    $token = $request->user()?->currentAccessToken();
+    if ($token) {
+        $token->delete();
+    }
+    return response()->json(['ok' => true]);
+})->name('auth.logout');
 
 /**
  * PROTECTED LOGS (Sanctum Bearer + ENV toggle + email whitelist)
@@ -181,7 +182,7 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         ]);
     })->where('file', '[A-Za-z0-9._-]+')->name('admin.logs.view');
 
-    // 3) View (query version) – enak buat Postman/Browser
+    // 3) View (query version)
     //    Contoh: GET /api/admin/logs/view?file=laravel.log&raw=1&bytes=131072
     Route::get('/view', function (Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
@@ -255,7 +256,7 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         return response()->download($full, basename($full), ['Content-Type' => 'text/plain; charset=UTF-8']);
     })->where('file', '[A-Za-z0-9._-]+')->name('admin.logs.download');
 
-    // 5) Download (query version) – anti 404 karena .log di path
+    // 5) Download (query version)
     //    Contoh: GET /api/admin/logs/download?file=laravel-YYYY-MM-DD.log
     Route::get('/download', function (Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
@@ -281,7 +282,7 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         return response()->download($full, basename($full), ['Content-Type' => 'text/plain; charset=UTF-8']);
     })->name('admin.logs.downloadq');
 
-    // 6) Write test – paksa nulis 1 baris ke file log tanpa bergantung Facade
+    // 6) Write test – paksa nulis 1 baris ke file log
     //    Contoh: POST /api/admin/logs/write-test
     Route::post('/write-test', function (Request $request) {
         try {
@@ -331,6 +332,8 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 // Prune token kedaluwarsa tiap 02:30 UTC
 Schedule::command('pat:prune')->dailyAt('02:30');
 
+// NOTE: Route /me berikut ini juga ada (tanpa 'pat.expires').
+// DIBIARKAN sesuai file kamu — jika tidak diperlukan, bisa dihapus nanti.
 Route::middleware('auth:sanctum')->get('/me', function (Request $r) {
   $u = $r->user();
   return ['ok'=>true,'user'=>['id'=>$u->id,'name'=>$u->name,'email'=>$u->email,'role'=>$u->role]];
@@ -348,7 +351,7 @@ Route::middleware('throttle:20,1')->post('/registrations', [RegistrationControll
 // Route::middleware(['auth:sanctum','role:admin,superadmin'])
 //     ->get('/registrations', [RegistrationController::class, 'index']);
 
-// ——— TAMBAHKAN INI: list data untuk FE/admin ———
+// ——— list data untuk FE/admin ———
 Route::middleware('throttle:30,1')->get('/registrations-list', function (Request $r) {
     $q = trim((string) $r->query('q', ''));
 
@@ -372,7 +375,6 @@ Route::middleware('throttle:30,1')->get('/registrations-list', function (Request
     return ['ok' => true, 'data' => $rows];
 });
 
-
-
+// Master data for FE (tetap sesuai Controller yang ada)
 Route::get('/master/yayasan', [MasterController::class, 'yayasan']);
 Route::get('/master/sekolah', [MasterController::class, 'sekolah']);
