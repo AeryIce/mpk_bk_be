@@ -145,9 +145,15 @@ class RegistrationController extends Controller
         $dupReason    = 'none';
 
         if ($hasDupCols) {
+            // ✅ Build daftar kolom SELECT dinamis — jangan SELECT 'meta' jika kolomnya tidak ada
+            $selectCols = ['id','instansi','email','wa','alamat','kota','provinsi','dup_group_id','is_primary'];
+            if ($hasMetaCol) {
+                $selectCols[] = 'meta';
+            }
+
             // Ambil kandidat terbaru secukupnya (cepat & efektif)
             $candidates = DB::table('registrations')
-                ->select('id','instansi','email','wa','alamat','kota','provinsi','dup_group_id','is_primary','meta')
+                ->select($selectCols)
                 ->orderByDesc('id')
                 ->limit(1000)
                 ->get();
@@ -167,7 +173,12 @@ class RegistrationController extends Controller
             $bestGroup  = null;
 
             foreach ($candidates as $row) {
-                $meta = is_array($row->meta) ? $row->meta : (json_decode($row->meta ?? '{}', true) ?: []);
+                // ✅ Aman kalau kolom 'meta' memang belum ada
+                $meta = [];
+                if ($hasMetaCol && property_exists($row, 'meta')) {
+                    $meta = is_array($row->meta) ? $row->meta : (json_decode($row->meta ?? '{}', true) ?: []);
+                }
+
                 $cand = [
                     'instansi'  => $row->instansi,
                     'email'     => $row->email,
