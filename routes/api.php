@@ -385,6 +385,7 @@ Route::get('/master/perusahaan', [MasterController::class, 'perusahaan']);
 Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::get('/registrations', [RegistrationAdminController::class, 'index']);   // list + search + paginate
     Route::get('/registrations/{id}', [RegistrationAdminController::class, 'show']); // detail
+    Route::post('/registrations', [RegistrationAdminController::class, 'store']);
     Route::patch('/registrations/{id}', [RegistrationAdminController::class, 'update']); // edit
     Route::delete('/registrations/{id}', [RegistrationAdminController::class, 'destroy']); // soft delete
 });
