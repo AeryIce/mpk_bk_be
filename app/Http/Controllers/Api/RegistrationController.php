@@ -7,7 +7,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Models\Registration;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -222,7 +221,7 @@ class RegistrationController extends Controller
             }
         }
 
-        // 6) Simpan aman
+        // 6) Simpan aman: coba Eloquent dulu, fallback ke DB insert jika mass-assignment ditolak
         try {
             $reg = Registration::create($payload);
 
@@ -234,6 +233,40 @@ class RegistrationController extends Controller
                 'id'  => $reg->id,
                 'msg' => 'Terima kasih! Data berhasil dikirim.',
             ], 201);
+
+        } catch (\Illuminate\Database\Eloquent\MassAssignmentException $e) {
+            try {
+                $row = $payload;
+
+                // timestamps
+                $row['created_at'] = now();
+                $row['updated_at'] = now();
+
+                // encode meta jika masih array (untuk DB insert langsung)
+                if (array_key_exists('meta', $row) && is_array($row['meta'])) {
+                    $row['meta'] = json_encode($row['meta']);
+                }
+
+                $id = DB::table('registrations')->insertGetId($row);
+
+                Cache::put($idemKey, 1, now()->addMinutes(10));
+
+                return response()->json([
+                    'ok'  => true,
+                    'id'  => $id,
+                    'msg' => 'Terima kasih! Data berhasil dikirim.',
+                ], 201);
+
+            } catch (\Throwable $e2) {
+                Log::error('[REG][STORE][DB-FALLBACK] '.$e2->getMessage(), [
+                    'file' => $e2->getFile(), 'line' => $e2->getLine()
+                ]);
+                return response()->json([
+                    'ok'      => false,
+                    'message' => 'Gagal menyimpan pendaftaran (fallback).',
+                ], 500);
+            }
+
         } catch (\Throwable $e) {
             Log::error('[REG][STORE] '.$e->getMessage(), ['file'=>$e->getFile(),'line'=>$e->getLine()]);
             return response()->json([

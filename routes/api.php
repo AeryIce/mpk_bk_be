@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Schedule;
 use App\Http\Controllers\Api\RegistrationController;
 use App\Models\Registration;
 use App\Http\Controllers\MasterController;
+use App\Http\Controllers\Api\Admin\RegistrationAdminController;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -379,3 +381,10 @@ Route::middleware('throttle:30,1')->get('/registrations-list', function (Request
 Route::get('/master/yayasan', [MasterController::class, 'yayasan']);
 Route::get('/master/sekolah', [MasterController::class, 'sekolah']);
 Route::get('/master/perusahaan', [MasterController::class, 'perusahaan']);
+
+Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
+    Route::get('/registrations', [RegistrationAdminController::class, 'index']);   // list + search + paginate
+    Route::get('/registrations/{id}', [RegistrationAdminController::class, 'show']); // detail
+    Route::patch('/registrations/{id}', [RegistrationAdminController::class, 'update']); // edit
+    Route::delete('/registrations/{id}', [RegistrationAdminController::class, 'destroy']); // soft delete
+});
