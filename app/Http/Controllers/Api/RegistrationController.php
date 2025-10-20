@@ -110,7 +110,7 @@ class RegistrationController extends Controller
             ], 201);
         }
 
-        // 4) Build payload simpan (tetap via Model)
+        // 4) Build payload simpan (via Model)
         $payload = [
             'instansi'  => $data['instansi'],
             'pic'       => $data['pic'],
@@ -128,12 +128,15 @@ class RegistrationController extends Controller
             'catatan'   => $data['catatan'] ?? null,
         ];
 
-        // 5) Anti-duplikasi (Soft-Single) — hanya aktif bila kolom sudah tersedia
+        // Apakah kolom dup_* & status ada?
         $hasDupCols = Schema::hasColumn('registrations', 'dup_group_id')
             && Schema::hasColumn('registrations', 'dup_score')
             && Schema::hasColumn('registrations', 'dup_reason')
             && Schema::hasColumn('registrations', 'is_primary')
             && Schema::hasColumn('registrations', 'status');
+
+        // Apakah kolom meta ada? (penting untuk hindari 500 ketika kolom belum dibuat)
+        $hasMetaCol = Schema::hasColumn('registrations', 'meta');
 
         $status       = 'new';
         $dupGroupId   = null;
@@ -209,16 +212,11 @@ class RegistrationController extends Controller
             $payload['dup_reason']   = $dupReason;
             $payload['is_primary']   = $isPrimary;
             $payload['status']       = $status;
+        }
 
-            // simpan meta bila ada (jaga kompatibilitas)
-            if (array_key_exists('meta', $data)) {
-                $payload['meta'] = $data['meta'];
-            }
-        } else {
-            // Kolom duplikasi belum ada → jalur lama (tanpa mengubah perilaku)
-            if (array_key_exists('meta', $data)) {
-                $payload['meta'] = $data['meta'];
-            }
+        // Hanya simpan 'meta' bila kolomnya ADA di DB
+        if ($hasMetaCol && array_key_exists('meta', $data)) {
+            $payload['meta'] = $data['meta'];
         }
 
         // 6) Simpan aman: coba Eloquent dulu, fallback ke DB insert jika mass-assignment ditolak
@@ -242,9 +240,12 @@ class RegistrationController extends Controller
                 $row['created_at'] = now();
                 $row['updated_at'] = now();
 
-                // encode meta jika masih array (untuk DB insert langsung)
-                if (array_key_exists('meta', $row) && is_array($row['meta'])) {
+                // Kalau meta masih array & kolomnya ada, encode JSON untuk DB insert langsung
+                if ($hasMetaCol && array_key_exists('meta', $row) && is_array($row['meta'])) {
                     $row['meta'] = json_encode($row['meta']);
+                } else {
+                    // Pastikan tidak menyisipkan kolom yang tidak ada
+                    unset($row['meta']);
                 }
 
                 $id = DB::table('registrations')->insertGetId($row);
@@ -276,7 +277,7 @@ class RegistrationController extends Controller
         }
     }
 
-    // ===== Helper normalisasi & scoring sederhana (inline agar tidak mengubah struktur proyek) =====
+    // ===== Helper normalisasi & scoring sederhana =====
 
     private function normText(?string $v): string
     {
