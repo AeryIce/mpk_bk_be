@@ -130,4 +130,30 @@ pre{white-space:pre-wrap;background:#0f172a;border:1px solid #334155;border-radi
     if (pre) pre.scrollTop = pre.scrollHeight;
   }
 })();
-</script
+</script>
+</body></html>
+HTML;
+
+        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    public function download(Request $r)
+    {
+        $file = (string) $r->query('file', '');
+        $path = $file !== '' ? $this->safe($file) : $this->latest();
+        if (!$path) return response('no log', 404);
+
+        return Response::download($path, basename($path), [
+            'Content-Type' => 'text/plain; charset=utf-8',
+        ]);
+    }
+
+    // opsional: untuk seed log pertama kali
+    public function writeTest()
+    {
+        $name = 'laravel-'.date('Y-m-d').'.log';
+        $path = $this->dir() . DIRECTORY_SEPARATOR . $name;
+        @file_put_contents($path, '['.date('c').'] BK-CONSOLE TEST ❖ '.Str::uuid()->toString().PHP_EOL, FILE_APPEND);
+        return response()->json(['ok' => true, 'file' => $name]);
+    }
+}
