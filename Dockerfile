@@ -3,14 +3,12 @@ FROM public.ecr.aws/docker/library/composer:2 AS vendor
 WORKDIR /app
 ENV COMPOSER_ALLOW_SUPERUSER=1
 COPY composer.json composer.lock ./
-# Penting: --no-scripts mencegah artisan dipanggil saat build (belum ada artisan)
 RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-scripts
 
 # ---------- Stage 2: PHP 8.3 + Apache (runtime) ----------
 FROM public.ecr.aws/docker/library/php:8.3-apache
 
-# Lib & ekstensi PHP yang diperlukan
-# (NOTE: libonig-dev Wajib agar mbstring sukses compile)
+# Dependensi & ekstensi PHP (mbstring butuh libonig-dev)
 RUN apt-get update && apt-get install -y \
     git unzip libicu-dev libpq-dev libzip-dev \
     libpng-dev libjpeg-dev libfreetype6-dev libonig-dev \
@@ -30,7 +28,7 @@ RUN a2enmod rewrite && \
 # Apache hardening ringan
 RUN printf "ServerTokens Prod\nServerSignature Off\n" > /etc/apache2/conf-available/hardening.conf && a2enconf hardening
 
-# PHP production tweaks (WITA, batasan wajar, OPcache)
+# PHP production tweaks (Jakarta)
 RUN printf "date.timezone=Asia/Jakarta\n\
 memory_limit=256M\n\
 upload_max_filesize=16M\n\
@@ -44,7 +42,7 @@ opcache.interned_strings_buffer=16\n" > /usr/local/etc/php/conf.d/zz-prod.ini
 
 WORKDIR /var/www/html
 
-# Copy seluruh source app
+# Copy source app
 COPY . /var/www/html
 
 # Bawa vendor hasil stage 1 + composer binary
@@ -57,12 +55,13 @@ RUN chown -R www-data:www-data storage bootstrap/cache \
 
 # Set document root ke /public dan port 8080 (Railway)
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
+ENV PORT=8080
 RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/*.conf \
  && sed -ri -e 's!/var/www/html!/var/www/html/public!g' /etc/apache2/apache2.conf \
- && sed -i 's/Listen 80/Listen 8080/' /etc/apache2/ports.conf
+ && sed -i 's/Listen 80/Listen 8080/' /etc/apache2/ports.conf \
+ && sed -ri -e 's!<VirtualHost \*:80>!<VirtualHost *:8080>!g' /etc/apache2/sites-available/*.conf
 
 EXPOSE 8080
-ENV PORT=8080
 
 # Aman: hanya rebuild autoload (tanpa script artisan)
 RUN composer dump-autoload -o
