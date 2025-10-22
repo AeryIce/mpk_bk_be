@@ -51,36 +51,34 @@ class MasterController extends Controller
 
     // GET /api/master/sekolah?yayasanId=38&jenjang=TK&kota=Jakarta%20Barat&q=...&limit=500
     public function sekolah(Request $req)
-    {
-        $yayasanId = (int) $req->query('yayasanId', 0);
-        if ($yayasanId <= 0) return response()->json(['error'=>'yayasanId is required'], 400);
+{
+    $yayasanId = trim($req->query('yayasanId', ''));
+    if (!$yayasanId) return response()->json(['error'=>'yayasanId is required'], 400);
 
-        $limit   = min(500, max(1, (int) $req->query('limit', 100)));
-        $jenjang = $this->normJenjang($req->query('jenjang')); // opsional
-        $kotaRaw = (string) $req->query('kota', '');            // opsional (FE tidak punya field ini)
-        $q       = trim(strtolower($req->query('q', '')));
+    // FE kamu kadang kirim ini, tapi DIABAIKAN saja agar kompatibel dg versi 21 Okt
+    // (tidak ada filter kota/jenjang di BE)
+    // $jenjang = $req->query('jenjang');
+    // $kota    = $req->query('kota');
 
-        // jika kota kosong atau placeholder -> JANGAN filter kota
-        $ignoreKota = $kotaRaw === '' || in_array(strtolower($kotaRaw), [
-            '(semua kota)','semua','semua kota','all','__all__'
-        ], true);
+    $q     = trim(strtolower($req->query('q', '')));
+    $limit = min(500, max(1, (int)$req->query('limit', 100))); // naikkan ke 500 biar aman
 
-        $rows = Sekolah::query()
-            ->where('yayasan_id', $yayasanId)
-            ->when($jenjang, fn ($w) => $w->whereRaw('LOWER(jenjang) = ?', [$jenjang]))
-            ->when(!$ignoreKota, fn ($w) => $w->where('kabupaten', $kotaRaw))
-            ->when(strlen($q) >= 2, function($qq) use ($q) {
-                $qq->where(function($w) use ($q) {
-                    $w->whereRaw('LOWER(name) LIKE ?', ["%{$q}%"])
-                      ->orWhereRaw('LOWER(jenjang) LIKE ?', ["%{$q}%"]);
-                });
-            })
-            ->orderBy('kabupaten')->orderBy('name')
-            ->limit($limit)
-            ->get(['id','name','jenjang','kecamatan','kabupaten','provinsi','npsn']);
+    $rows = \App\Models\Sekolah::query()
+        ->where('yayasan_id', $yayasanId)
+        // seperti versi 21 Okt: hanya pencarian bebas di name/jenjang (bukan filter equals)
+        ->when(strlen($q) >= 2, function($qq) use ($q) {
+            $qq->where(function($w) use ($q) {
+                $w->whereRaw('LOWER(name) LIKE ?', ["%{$q}%"])
+                  ->orWhereRaw('LOWER(jenjang) LIKE ?', ["%{$q}%"]);
+            });
+        })
+        ->orderBy('name')
+        ->limit($limit)
+        ->get(['id','name','jenjang','kecamatan','kabupaten','provinsi','npsn']);
 
-        return response()->json(['ok' => true, 'data' => $rows]);
-    }
+    return response()->json($rows);
+}
+
 
     // GET /api/master/perusahaan?q=...&limit=50
     public function perusahaan(Request $r)
