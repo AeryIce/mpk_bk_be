@@ -9,7 +9,8 @@ use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Auth\MagicLinkController;
 use App\Http\Controllers\Api\RegistrationController;
 use App\Http\Controllers\Api\Admin\RegistrationAdminController;
-use App\Http\Controllers\MasterController; // <- MasterController di App\Http\Controllers
+use App\Http\Controllers\MasterController; // MasterController di App\Http\Controllers
+use App\Models\Registration;
 
 /*
 |--------------------------------------------------------------------------
@@ -29,7 +30,7 @@ Route::prefix('auth')->group(function () {
         'time' => now()->toIso8601String(),
     ]))->name('auth.ping');
 
-    // Rate limiter pakai alias yang didefinisikan di AppServiceProvider
+    // Rate limiter alias didefinisikan di AppServiceProvider
     Route::post('/magic-link/request', [MagicLinkController::class, 'request'])
         ->middleware('throttle:magiclink-email')
         ->name('auth.magiclink.request');
@@ -69,14 +70,11 @@ Route::middleware(['auth:sanctum','pat.expires'])->post('/logout', function (Req
 })->name('auth.logout');
 
 /**
- * PROTECTED LOGS (Sanctum Bearer + ENV toggle + email whitelist)
- * .env:
- *   LOG_VIEWER_ENABLED=true
- *   LOG_VIEWER_EMAILS=agahariiswarajati@gmail.com
+ * PROTECTED LOGS (Sanctum Bearer + ENV toggle + whitelist)
  */
 Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 
-    // 0) Ping – cepat cek enable & whitelist
+    // 0) Ping – cek enable & whitelist
     Route::get('/ping', function (Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
         $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
@@ -174,7 +172,7 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         ]);
     })->where('file', '[A-Za-z0-9._-]+')->name('admin.logs.view');
 
-    // 3) View (query version)
+    // 3) View (query version) -> download
     Route::get('/view', function (Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
         if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
@@ -277,7 +275,6 @@ Route::middleware('throttle:20,1')->post('/registrations', [RegistrationControll
 /**
  * List untuk FE/admin cepat (tanpa auth)
  */
-use App\Models\Registration;
 Route::middleware('throttle:30,1')->get('/registrations-list', function (Request $r) {
     $q = trim((string) $r->query('q', ''));
 
@@ -305,13 +302,8 @@ Route::middleware('throttle:30,1')->get('/registrations-list', function (Request
  * Master data for FE
  */
 Route::get('/master/yayasan', [MasterController::class, 'yayasan']);
-
-// NEW: endpoint kota/kabupaten per yayasan + jenjang
-Route::get('/master/sekolah/cities', [MasterController::class, 'sekolahCities']);
-
-// enhanced: sekolah list (dengan filter jenjang/kota/q)
+Route::get('/master/sekolah/cities', [MasterController::class, 'sekolahCities']); // NEW
 Route::get('/master/sekolah', [MasterController::class, 'sekolah']);
-
 Route::get('/master/perusahaan', [MasterController::class, 'perusahaan']);
 
 /**

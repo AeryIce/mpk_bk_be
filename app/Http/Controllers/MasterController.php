@@ -32,18 +32,18 @@ class MasterController extends Controller
      */
     public function sekolahCities(Request $req)
     {
-        $data = $req->validate([
-            'yayasanId' => 'required|integer',
-            'jenjang'   => 'nullable|string',
-        ]);
-
-        $jenjang = $this->normJenjang($data['jenjang'] ?? null);
+        // parsing manual biar fleksibel & anti-422
+        $yayasanId = (int) $req->query('yayasanId', 0);
+        if ($yayasanId <= 0) {
+            return response()->json(['error' => 'yayasanId is required'], 400);
+        }
+        $jenjang = $this->normJenjang($req->query('jenjang'));
 
         $cities = Sekolah::query()
-            ->where('yayasan_id', $data['yayasanId'])
+            ->where('yayasan_id', $yayasanId)
             ->when($jenjang, fn ($w) => $w->whereRaw('LOWER(jenjang) = ?', [$jenjang]))
             ->orderBy('kabupaten')
-            ->pluck('kabupaten')   // gunakan kolom 'kabupaten' sebagai city
+            ->pluck('kabupaten')
             ->unique()
             ->values();
 
@@ -51,28 +51,26 @@ class MasterController extends Controller
     }
 
     /**
-     * GET /api/master/sekolah?yayasanId=38&jenjang=TK&kota=Jakarta%20Barat&q=bellarminus&limit=50
+     * GET /api/master/sekolah?yayasanId=38&jenjang=TK&kota=Jakarta%20Barat&q=bellarminus&limit=500
      * List sekolah dengan filter akurat (yayasan wajib; jenjang/kota/q opsional)
      */
     public function sekolah(Request $req)
     {
-        $data = $req->validate([
-            'yayasanId' => 'required|integer',
-            'jenjang'   => 'nullable|string',
-            'kota'      => 'nullable|string', // FE boleh kirim 'kota' -> kita cocokkan ke kolom 'kabupaten'
-            'q'         => 'nullable|string',
-            'limit'     => 'nullable|integer|min:1|max:200',
-        ]);
+        // parsing manual (hilangkan 422 saat limit=500)
+        $yayasanId = (int) $req->query('yayasanId', 0);
+        if ($yayasanId <= 0) {
+            return response()->json(['error' => 'yayasanId is required'], 400);
+        }
 
-        $limit   = $data['limit'] ?? 100;
-        $jenjang = $this->normJenjang($data['jenjang'] ?? null);
-        $kota    = $data['kota'] ?? null;
-        $q       = trim(strtolower($data['q'] ?? ''));
+        $limit   = min(500, max(1, (int) $req->query('limit', 100)));
+        $jenjang = $this->normJenjang($req->query('jenjang'));
+        $kota    = $req->query('kota');
+        $q       = trim(strtolower($req->query('q', '')));
 
         $rows = Sekolah::query()
-            ->where('yayasan_id', $data['yayasanId'])
+            ->where('yayasan_id', $yayasanId)
             ->when($jenjang, fn ($w) => $w->whereRaw('LOWER(jenjang) = ?', [$jenjang]))
-            ->when($kota, fn ($w)         => $w->where('kabupaten', $kota))
+            ->when($kota,    fn ($w) => $w->where('kabupaten', $kota)) // FE kirim "kota" -> kolom "kabupaten"
             ->when(strlen($q) >= 2, function ($qq) use ($q) {
                 $qq->where(function ($w) use ($q) {
                     $w->whereRaw('LOWER(name) LIKE ?', ["%{$q}%"])
