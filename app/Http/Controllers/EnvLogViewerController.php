@@ -59,6 +59,13 @@ class EnvLogViewerController extends Controller
         return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
+    public function boom() 
+    {
+    logger()->error('BK DEMO ERROR: percobaan log');
+    throw new \RuntimeException('BK CONSOLE demo exception');
+    }
+
+
     public function index(Request $r)
     {
         $file  = (string) $r->query('file', '');
