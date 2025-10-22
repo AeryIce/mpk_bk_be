@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Str; 
 use Illuminate\Support\Facades\Response;
+use Illuminate\Support\Str;
 
 class EnvLogViewerController extends Controller
 {
@@ -22,13 +22,6 @@ class EnvLogViewerController extends Controller
         if (!str_ends_with($path, '.log')) return null;
         return $path;
     }
-    public function writeTest()
-    {
-        $name = 'laravel-'.date('Y-m-d').'.log';
-        $path = storage_path('logs'.DIRECTORY_SEPARATOR.$name);
-        @file_put_contents($path, '['.date('c').'] BK-CONSOLE TEST ❖ '.Str::uuid()->toString().PHP_EOL, FILE_APPEND);
-        return response()->json(['ok' => true, 'file' => $name]);
-    }
 
     private function latest(): ?string
     {
@@ -42,7 +35,7 @@ class EnvLogViewerController extends Controller
     private function tail(string $path, int $bytes): string
     {
         $size  = @filesize($path) ?: 0;
-        $bytes = max(4096, min($bytes, 4 * 1024 * 1024)); // 4MB max
+        $bytes = max(4096, min($bytes, 4 * 1024 * 1024));
         $start = max(0, $size - $bytes);
 
         $fh = @fopen($path, 'rb');
@@ -59,17 +52,12 @@ class EnvLogViewerController extends Controller
         return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
-    // public function boom() 
-    // {
-    // logger()->error('BK DEMO ERROR: percobaan log');
-    // throw new \RuntimeException('BK CONSOLE demo exception');
-    // }
-
-
     public function index(Request $r)
     {
-        $file  = (string) $r->query('file', '');
-        $bytes = (int) $r->query('bytes', 131072);
+        $file   = (string) $r->query('file', '');
+        $bytes  = (int) $r->query('bytes', 131072);
+        $orderQ = strtolower((string) $r->query('order', env('LOG_VIEW_ORDER', 'asc')));
+        $order  = $orderQ === 'desc' ? 'desc' : 'asc'; // default asc bila tidak valid
 
         $path = $file !== '' ? $this->safe($file) : $this->latest();
         if (!$path) {
@@ -77,13 +65,39 @@ class EnvLogViewerController extends Controller
                 ->header('Content-Type', 'text/html; charset=utf-8');
         }
 
+        // Ambil tail
+        $content = $this->tail($path, $bytes);
+
+        // Urutkan jika diminta newest-first (desc)
+        if ($order === 'desc') {
+            $lines = preg_split("/\r\n|\n|\r/", trim($content));
+            $content = implode(PHP_EOL, array_reverse($lines));
+        }
+
+        // Raw text?
         if ($r->boolean('raw')) {
-            return response($this->tail($path, $bytes), 200)
+            return response($content, 200)
                 ->header('Content-Type', 'text/plain; charset=utf-8');
         }
 
-        $fname = basename($path);
+        $fname        = basename($path);
+        $currentOrder = $order;
+        $toggleOrder  = $order === 'desc' ? 'asc' : 'desc';
+        $toggleLabel  = $order === 'desc' ? 'Oldest first' : 'Newest first';
+
+        // build query strings
         $qsDownload = http_build_query(['file' => $fname]);
+        $rawQs      = http_build_query([
+            'raw'   => 1,
+            'file'  => $file,
+            'bytes' => $bytes,
+            'order' => $currentOrder,
+        ]);
+        $toggleQs   = http_build_query([
+            'file'  => $file,
+            'bytes' => $bytes,
+            'order' => $toggleOrder,
+        ]);
 
         $html = <<<HTML
 <!doctype html><html><head><meta charset="utf-8"><title>BK Console</title>
@@ -98,26 +112,22 @@ pre{white-space:pre-wrap;background:#0f172a;border:1px solid #334155;border-radi
 <form method="get" style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
   <label>File: <input name="file" value="{$this->esc($file)}" placeholder="kosongkan untuk terbaru"></label>
   <label>Tail (bytes): <input name="bytes" type="number" value="{$bytes}" min="4096" step="4096"></label>
+  <input type="hidden" name="order" value="{$this->esc($currentOrder)}">
   <button type="submit">Apply</button>
-  <a href="?raw=1&file={$this->esc($file)}&bytes={$bytes}">Raw</a>
-  <a href="download?{$qsDownload}" style="margin-left:8px">Download</a>
+  <a href="?{$this->esc($rawQs)}">Raw</a>
+  <a href="download?{$this->esc($qsDownload)}" style="margin-left:8px">Download</a>
+  <a href="?{$this->esc($toggleQs)}" style="margin-left:8px">{$this->esc($toggleLabel)}</a>
 </form>
-<div style="margin-bottom:6px">Menampilkan: <b>{$this->esc($fname)}</b></div>
-<pre>{$this->esc($this->tail($path, $bytes))}</pre>
-</body></html>
-HTML;
-
-        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
-    }
-
-    public function download(Request $r)
-    {
-        $file = (string) $r->query('file', '');
-        $path = $file !== '' ? $this->safe($file) : $this->latest();
-        if (!$path) return response('no log', 404);
-
-        return Response::download($path, basename($path), [
-            'Content-Type' => 'text/plain; charset=utf-8',
-        ]);
-    }
-}
+<div style="margin-bottom:6px">Menampilkan: <b>{$this->esc($fname)}</b> — urutan: <b>{$this->esc(strtoupper($currentOrder))}</b></div>
+<pre id="logpre">{$this->esc($content)}</pre>
+<script>
+// Auto-scroll ke bawah jika order ASC (terbaru di bawah)
+(function(){
+  var params = new URLSearchParams(location.search);
+  var order = (params.get('order') || '{$this->esc($currentOrder)}').toLowerCase();
+  if (order !== 'desc') {
+    var pre = document.getElementById('logpre');
+    if (pre) pre.scrollTop = pre.scrollHeight;
+  }
+})();
+</script
