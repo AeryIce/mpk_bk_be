@@ -3,21 +3,22 @@ FROM public.ecr.aws/docker/library/composer:2 AS vendor
 WORKDIR /app
 ENV COMPOSER_ALLOW_SUPERUSER=1
 COPY composer.json composer.lock ./
-# Penting: --no-scripts mencegah artisan jalan di stage ini
+# Penting: --no-scripts mencegah artisan dipanggil saat build (belum ada artisan)
 RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-scripts
 
 # ---------- Stage 2: PHP 8.3 + Apache (runtime) ----------
 FROM public.ecr.aws/docker/library/php:8.3-apache
 
-# Lib & ekstensi PHP yang kita pakai
+# Lib & ekstensi PHP yang diperlukan
+# (NOTE: libonig-dev Wajib agar mbstring sukses compile)
 RUN apt-get update && apt-get install -y \
     git unzip libicu-dev libpq-dev libzip-dev \
-    libpng-dev libjpeg-dev libfreetype6-dev \
+    libpng-dev libjpeg-dev libfreetype6-dev libonig-dev \
  && docker-php-ext-configure gd --with-freetype --with-jpeg \
- && docker-php-ext-install -j$(nproc) pdo_pgsql intl gd zip opcache mbstring bcmath \
+ && docker-php-ext-install -j"$(nproc)" pdo_pgsql intl gd zip opcache mbstring bcmath \
  && rm -rf /var/lib/apt/lists/*
 
-# Mod rewrite untuk Laravel di Apache + prioritas index.php
+# Aktifkan rewrite + izinkan .htaccess di /public + prioritas index.php
 RUN a2enmod rewrite && \
     printf "<Directory /var/www/html/public>\n\
     AllowOverride All\n\
@@ -26,7 +27,10 @@ RUN a2enmod rewrite && \
     a2enconf laravel && \
     sed -i 's/DirectoryIndex .*/DirectoryIndex index.php index.html/' /etc/apache2/mods-enabled/dir.conf
 
-# PHP production tweaks (timezone, upload limit, OPcache)
+# Apache hardening ringan
+RUN printf "ServerTokens Prod\nServerSignature Off\n" > /etc/apache2/conf-available/hardening.conf && a2enconf hardening
+
+# PHP production tweaks (WITA, batasan wajar, OPcache)
 RUN printf "date.timezone=Asia/Jakarta\n\
 memory_limit=256M\n\
 upload_max_filesize=16M\n\
