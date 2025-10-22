@@ -13,10 +13,10 @@ class MasterController extends Controller
     public function yayasan(Request $req)
     {
         $q     = trim(strtolower($req->query('q', '')));
-        $limit = min(100, max(1, (int) $req->query('limit', 50)));
+        $limit = min(100, max(1, (int)$req->query('limit', 50)));
 
         $rows = Yayasan::query()
-            ->when(strlen($q) >= 2, fn ($qq) => $qq->whereRaw('LOWER(name) LIKE ?', ["%{$q}%"]))
+            ->when(strlen($q) >= 2, fn($qq) => $qq->whereRaw('LOWER(name) LIKE ?', ["%{$q}%"]))
             ->orderBy('name')
             ->limit($limit)
             ->get(['id','name']);
@@ -24,14 +24,37 @@ class MasterController extends Controller
         return response()->json($rows);
     }
 
+    // GET /api/master/sekolah?yayasanId=38&limit=500[&q=...]
+    // ⛳️ Kembali ke perilaku lama: abaikan jenjang/kota; cukup yayasanId (+ optional q)
+    public function sekolah(Request $req)
+    {
+        $yayasanId = trim($req->query('yayasanId', ''));
+        if (!$yayasanId) return response()->json(['error'=>'yayasanId is required'], 400);
+
+        $q     = trim(strtolower($req->query('q', '')));
+        $limit = min(500, max(1, (int)$req->query('limit', 100)));
+
+        $rows = Sekolah::query()
+            ->where('yayasan_id', $yayasanId)
+            ->when(strlen($q) >= 2, function($qq) use ($q) {
+                $qq->where(function($w) use ($q) {
+                    $w->whereRaw('LOWER(name) LIKE ?', ["%{$q}%"])
+                      ->orWhereRaw('LOWER(jenjang) LIKE ?', ["%{$q}%"]);
+                });
+            })
+            ->orderBy('name')
+            ->limit($limit)
+            ->get(['id','name','jenjang','kecamatan','kabupaten','provinsi','npsn']);
+
+        return response()->json($rows);
+    }
+
     // GET /api/master/sekolah/cities?yayasanId=38&jenjang=TK
-    // -> aman: selalu 200 + sisipkan "(Semua Kota)" agar FE bisa lanjut walau user belum pilih kota
+    // 🔕 Opsional untuk FE: selalu 200, taruh "(Semua Kota)" di depan
     public function sekolahCities(Request $req)
     {
         $yayasanId = (int) $req->query('yayasanId', 0);
-        if ($yayasanId <= 0) {
-            return response()->json(['error' => 'yayasanId is required'], 400);
-        }
+        if ($yayasanId <= 0) return response()->json(['error' => 'yayasanId is required'], 400);
 
         $jenjang = $this->normJenjang($req->query('jenjang'));
 
@@ -41,44 +64,13 @@ class MasterController extends Controller
             ->orderBy('kabupaten')
             ->pluck('kabupaten')
             ->unique()
-            ->filter() // buang null/empty
+            ->filter()
             ->values()
             ->all();
 
         $result = array_values(array_unique(array_merge(['(Semua Kota)'], $cities)));
         return response()->json(['ok' => true, 'data' => $result]);
     }
-
-    // GET /api/master/sekolah?yayasanId=38&jenjang=TK&kota=Jakarta%20Barat&q=...&limit=500
-    public function sekolah(Request $req)
-{
-    $yayasanId = trim($req->query('yayasanId', ''));
-    if (!$yayasanId) return response()->json(['error'=>'yayasanId is required'], 400);
-
-    // FE kamu kadang kirim ini, tapi DIABAIKAN saja agar kompatibel dg versi 21 Okt
-    // (tidak ada filter kota/jenjang di BE)
-    // $jenjang = $req->query('jenjang');
-    // $kota    = $req->query('kota');
-
-    $q     = trim(strtolower($req->query('q', '')));
-    $limit = min(500, max(1, (int)$req->query('limit', 100))); // naikkan ke 500 biar aman
-
-    $rows = \App\Models\Sekolah::query()
-        ->where('yayasan_id', $yayasanId)
-        // seperti versi 21 Okt: hanya pencarian bebas di name/jenjang (bukan filter equals)
-        ->when(strlen($q) >= 2, function($qq) use ($q) {
-            $qq->where(function($w) use ($q) {
-                $w->whereRaw('LOWER(name) LIKE ?', ["%{$q}%"])
-                  ->orWhereRaw('LOWER(jenjang) LIKE ?', ["%{$q}%"]);
-            });
-        })
-        ->orderBy('name')
-        ->limit($limit)
-        ->get(['id','name','jenjang','kecamatan','kabupaten','provinsi','npsn']);
-
-    return response()->json($rows);
-}
-
 
     // GET /api/master/perusahaan?q=...&limit=50
     public function perusahaan(Request $r)
@@ -94,14 +86,13 @@ class MasterController extends Controller
             })
             ->orderBy('name')
             ->limit($limit)
-            ->get(['id','name'])
+            ->get(['id', 'name'])
             ->map(fn ($r) => ['id' => (string) $r->id, 'name' => $r->name])
             ->values();
 
         return response()->json($rows);
     }
 
-    // helper normalisasi jenjang (biar TK/SD/SMP/SMA/SMK konsisten)
     private function normJenjang(?string $j): ?string
     {
         if (!$j) return null;

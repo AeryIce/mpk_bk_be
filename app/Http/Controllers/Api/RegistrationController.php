@@ -15,7 +15,7 @@ class RegistrationController extends Controller
 {
     public function store(Request $request)
     {
-        // 1) Validasi input (tetap seperti sebelumnya)
+        // 1) Validasi input (utama) — meta dilonggarkan (tanpa exists) supaya tidak 422
         $data = $request->validate(
             [
                 'instansi'   => ['required', 'string', 'max:255'],
@@ -37,13 +37,13 @@ class RegistrationController extends Controller
 
                 'catatan'    => ['nullable', 'string'],
 
-                // meta dari FE (opsional) – untuk guard & scoring
+                // meta dari FE (opsional) – dilonggarkan
                 'meta.path'         => ['nullable', 'in:perusahaan,yayasan,sekolah'],
                 'meta.jenjang'      => ['nullable', 'string', 'max:50'],
-                'meta.yayasanId'    => ['nullable', 'string', 'exists:yayasan,id'],
+                'meta.yayasanId'    => ['nullable', 'string'],
                 'meta.yayasanLabel' => ['nullable', 'string', 'max:255'],
                 'meta.kotaOpt'      => ['nullable', 'string', 'max:255'],
-                'meta.sekolahId'    => ['nullable', 'string', 'exists:sekolah,id'],
+                'meta.sekolahId'    => ['nullable', 'string'],
             ],
             [],
             [
@@ -55,42 +55,48 @@ class RegistrationController extends Controller
             ]
         );
 
-        // 2) Guard ringan berbasis path (tetap)
+        // 2) Normalisasi + guard ringan (FAIL-SOFT, tanpa 422)
         $path      = data_get($data, 'meta.path');
-        $yayasanId = data_get($data, 'meta.yayasanId');
-        $sekolahId = data_get($data, 'meta.sekolahId');
+        $yayasanId = trim((string) data_get($data, 'meta.yayasanId', ''));
+        $sekolahId = trim((string) data_get($data, 'meta.sekolahId', ''));
 
-        if ($path === 'yayasan' && empty($yayasanId)) {
-            return response()->json([
-                'message' => 'Mohon pilih Yayasan yang valid.',
-                'errors'  => ['meta.yayasanId' => ['Yayasan wajib dipilih pada mode Yayasan.']],
-            ], 422);
+        // normalisasi path
+        if (!in_array($path, ['perusahaan','yayasan','sekolah'], true)) {
+            $path = null;
+        }
+
+        // auto-fallback: mode sekolah tapi user belum klik saran → turunkan ke yayasan
+        if ($path === 'sekolah' && $sekolahId === '' && $yayasanId !== '') {
+            $path = 'yayasan';
+        }
+
+        // cek keberadaan ID (tanpa menggagalkan submit)
+        $yayasanValid = $yayasanId !== '' && DB::table('yayasan')->where('id', $yayasanId)->exists();
+        $sekolahValid = $sekolahId !== '' && DB::table('sekolah')->where('id', $sekolahId)->exists();
+
+        if ($path === 'yayasan' && !$yayasanValid) {
+            $path = null; // simpan tanpa link
         }
         if ($path === 'sekolah') {
-            if (empty($yayasanId)) {
-                return response()->json([
-                    'message' => 'Mohon pilih Yayasan untuk mode Sekolah.',
-                    'errors'  => ['meta.yayasanId' => ['Yayasan wajib dipilih pada mode Sekolah.']],
-                ], 422);
-            }
-            if (empty($sekolahId)) {
-                return response()->json([
-                    'message' => 'Mohon pilih Sekolah yang valid.',
-                    'errors'  => ['meta.sekolahId' => ['Sekolah wajib dipilih pada mode Sekolah.']],
-                ], 422);
+            if (!$yayasanValid || !$sekolahValid) {
+                $path = null;
+            } else {
+                // 3) Hard guard relasi sekolah→yayasan (fail-soft)
+                $okRel = DB::table('sekolah')
+                    ->where('id', $sekolahId)
+                    ->where('yayasan_id', $yayasanId)
+                    ->exists();
+                if (!$okRel) {
+                    $path = null; // relasi tak cocok → simpan tanpa link
+                }
             }
         }
 
-        // 3) Hard guard relasi sekolah→yayasan (tetap)
-        if ($yayasanId && $sekolahId) {
-            $belongsTo = DB::table('sekolah')->where('id', $sekolahId)->value('yayasan_id');
-            if (!$belongsTo || (string)$belongsTo !== (string)$yayasanId) {
-                return response()->json([
-                    'message' => 'Sekolah tidak sesuai dengan yayasan yang dipilih.',
-                    'errors'  => ['meta.sekolahId' => ['Sekolah tidak match dengan Yayasan.']],
-                ], 422);
-            }
+        // tulis kembali path hasil normalisasi ke meta (kalau meta ada)
+        if (!isset($data['meta']) || !is_array($data['meta'])) {
+            $data['meta'] = [];
         }
+        $data['meta']['path'] = $path;
 
         // 3.1) Idempotency window 10 menit (hindari double-tap submit)
         $idemKey = 'idem:registrations:' . sha1(json_encode([
@@ -102,7 +108,6 @@ class RegistrationController extends Controller
             $this->normText($data['provinsi'] ?? ''),
         ]));
         if (Cache::has($idemKey)) {
-            // Tetap format respons lama agar FE aman
             return response()->json([
                 'ok'  => true,
                 'id'  => null,
@@ -128,16 +133,16 @@ class RegistrationController extends Controller
             'catatan'   => $data['catatan'] ?? null,
         ];
 
-        // Apakah kolom dup_* & status ada?
+        // Cek kolom opsional
         $hasDupCols = Schema::hasColumn('registrations', 'dup_group_id')
             && Schema::hasColumn('registrations', 'dup_score')
             && Schema::hasColumn('registrations', 'dup_reason')
             && Schema::hasColumn('registrations', 'is_primary')
             && Schema::hasColumn('registrations', 'status');
 
-        // Apakah kolom meta ada? (penting untuk hindari 500 ketika kolom belum dibuat)
         $hasMetaCol = Schema::hasColumn('registrations', 'meta');
 
+        // Default status & duplicate flags
         $status       = 'new';
         $dupGroupId   = null;
         $isPrimary    = true;
@@ -145,13 +150,10 @@ class RegistrationController extends Controller
         $dupReason    = 'none';
 
         if ($hasDupCols) {
-            // ✅ Build daftar kolom SELECT dinamis — jangan SELECT 'meta' jika kolomnya tidak ada
+            // SELECT dinamis (hindari select kolom meta jika belum ada)
             $selectCols = ['id','instansi','email','wa','alamat','kota','provinsi','dup_group_id','is_primary'];
-            if ($hasMetaCol) {
-                $selectCols[] = 'meta';
-            }
+            if ($hasMetaCol) $selectCols[] = 'meta';
 
-            // Ambil kandidat terbaru secukupnya (cepat & efektif)
             $candidates = DB::table('registrations')
                 ->select($selectCols)
                 ->orderByDesc('id')
@@ -173,7 +175,6 @@ class RegistrationController extends Controller
             $bestGroup  = null;
 
             foreach ($candidates as $row) {
-                // ✅ Aman kalau kolom 'meta' memang belum ada
                 $meta = [];
                 if ($hasMetaCol && property_exists($row, 'meta')) {
                     $meta = is_array($row->meta) ? $row->meta : (json_decode($row->meta ?? '{}', true) ?: []);
@@ -201,7 +202,7 @@ class RegistrationController extends Controller
 
             if ($bestScore >= 100) {
                 $status     = 'duplicate';
-                $dupGroupId = $bestGroup; // pakai grup kandidat
+                $dupGroupId = $bestGroup;
                 $isPrimary  = false;
             } elseif ($bestScore >= 90) {
                 $status     = 'possible_duplicate';
@@ -209,7 +210,7 @@ class RegistrationController extends Controller
                 $isPrimary  = false;
             } else {
                 $status     = 'new';
-                $dupGroupId = null; // akan dibuat baru
+                $dupGroupId = null;
                 $isPrimary  = true;
             }
 
@@ -217,7 +218,6 @@ class RegistrationController extends Controller
                 $dupGroupId = (string) Str::uuid();
             }
 
-            // sisipkan ke payload simpan
             $payload['dup_group_id'] = $dupGroupId;
             $payload['dup_score']    = $dupScore;
             $payload['dup_reason']   = $dupReason;
@@ -225,16 +225,15 @@ class RegistrationController extends Controller
             $payload['status']       = $status;
         }
 
-        // Hanya simpan 'meta' bila kolomnya ADA di DB
+        // Simpan meta hanya kalau kolom ada
         if ($hasMetaCol && array_key_exists('meta', $data)) {
             $payload['meta'] = $data['meta'];
         }
 
-        // 6) Simpan aman: coba Eloquent dulu, fallback ke DB insert jika mass-assignment ditolak
+        // 6) Simpan: coba Eloquent, fallback ke query builder jika mass-assignment off
         try {
             $reg = Registration::create($payload);
 
-            // set idempotency window 10 menit
             Cache::put($idemKey, 1, now()->addMinutes(10));
 
             return response()->json([
@@ -247,15 +246,12 @@ class RegistrationController extends Controller
             try {
                 $row = $payload;
 
-                // timestamps
                 $row['created_at'] = now();
                 $row['updated_at'] = now();
 
-                // Kalau meta masih array & kolomnya ada, encode JSON untuk DB insert langsung
                 if ($hasMetaCol && array_key_exists('meta', $row) && is_array($row['meta'])) {
                     $row['meta'] = json_encode($row['meta']);
                 } else {
-                    // Pastikan tidak menyisipkan kolom yang tidak ada
                     unset($row['meta']);
                 }
 
@@ -361,21 +357,14 @@ class RegistrationController extends Controller
 
         $e1 = $this->normText($incoming['email'] ?? '');
         $e2 = $this->normText($candidate['email'] ?? '');
-        if ($e1 !== '' && $e1 === $e2) {
-            $score += 20; $reasons[] = 'email';
-        }
+        if ($e1 !== '' && $e1 === $e2) { $score += 20; $reasons[] = 'email'; }
 
         $w1 = $this->normPhone($incoming['wa'] ?? '');
         $w2 = $this->normPhone($candidate['wa'] ?? '');
-        if ($w1 !== '' && $w1 === $w2) {
-            $score += 20; $reasons[] = 'wa';
-        }
+        if ($w1 !== '' && $w1 === $w2) { $score += 20; $reasons[] = 'wa'; }
 
         $over = $this->substrOverlapScore($incoming['alamat'] ?? '', $candidate['alamat'] ?? '');
-        if ($over > 0) {
-            $score += $over;
-            $reasons[] = 'alamat';
-        }
+        if ($over > 0) { $score += $over; $reasons[] = 'alamat'; }
 
         return [$score, implode(', ', $reasons) ?: 'none'];
     }
