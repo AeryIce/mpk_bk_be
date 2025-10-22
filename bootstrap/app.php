@@ -31,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Global middlewares
         $middleware->append(HandleCors::class);                       // aktifkan CORS (config/cors.php)
         $middleware->append(\App\Http\Middleware\SecurityHeaders::class); // header keamanan dasar
+        $middleware->append(\App\Http\Middleware\RequestLogger::class);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Request API tanpa bearer -> 401 JSON (bukan redirect ke /login)
