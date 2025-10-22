@@ -25,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role'        => \App\Http\Middleware\EnsureRole::class,
             'pat.expires' => \App\Http\Middleware\EnsurePatIsNotExpired::class,
+            'env.basic' => \App\Http\Middleware\EnvBasicAuth::class,
         ]);
 
         // Global middlewares

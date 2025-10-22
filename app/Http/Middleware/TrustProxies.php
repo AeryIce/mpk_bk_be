@@ -9,12 +9,17 @@ class TrustProxies extends Middleware
 {
     /**
      * Percaya semua reverse proxies (Railway pakai proxy di depan app).
-     * Kalau mau lebih ketat, isi array alamat proxy spesifik.
      */
     protected $proxies = '*';
 
     /**
-     * Baca seluruh header X-Forwarded-* untuk IP/HTTPS/Host.
+     * Baca header X-Forwarded-* yang dipakai oleh Railway.
+     * (Konstanta HEADER_X_FORWARDED_ALL sudah dihapus.)
      */
-    protected $headers = Request::HEADER_X_FORWARDED_ALL;
+    protected $headers =
+        Request::HEADER_X_FORWARDED_FOR  |
+        Request::HEADER_X_FORWARDED_HOST |
+        Request::HEADER_X_FORWARDED_PORT |
+        Request::HEADER_X_FORWARDED_PROTO;
+        // kalau perlu prefix: tambahkan ->  | Request::HEADER_X_FORWARDED_PREFIX;
 }
