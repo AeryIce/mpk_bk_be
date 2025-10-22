@@ -6,7 +6,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Middleware\HandleCors;
 
-// (opsional) daftar console commands; aman walau class-nya belum ada
+// Aman: daftar command kalau class-nya ada (biar gak error saat build)
 $commands = [];
 if (class_exists(\App\Console\Commands\ImportMasterData::class)) {
     $commands[] = \App\Console\Commands\ImportMasterData::class;
@@ -50,14 +50,9 @@ $app = Application::configure(basePath: dirname(__DIR__))
     ->create();
 
 /**
- * Force zona waktu dari ENV agar timestamp log pakai WIB.
- * Aman meski config ke-cache, karena dieksekusi setelah app dibuat.
+ * Force zona waktu PHP dari ENV agar timestamp log pakai WIB.
+ * (JANGAN panggil helper config() di sini; container belum siap saat build)
  */
-date_default_timezone_set(env('APP_TIMEZONE', 'Asia/Jakarta'));
-config([
-    'app.timezone'                     => env('APP_TIMEZONE', 'Asia/Jakarta'),
-    'logging.channels.daily.timezone'  => env('APP_TIMEZONE', 'Asia/Jakarta'),
-    'logging.channels.single.timezone' => env('APP_TIMEZONE', 'Asia/Jakarta'),
-]);
+date_default_timezone_set(getenv('APP_TIMEZONE') ?: 'Asia/Jakarta');
 
 return $app;
