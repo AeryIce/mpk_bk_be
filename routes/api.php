@@ -2,15 +2,15 @@
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schedule;
-
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Auth\MagicLinkController;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schedule;
 use App\Http\Controllers\Api\RegistrationController;
-use App\Http\Controllers\Api\Admin\RegistrationAdminController;
-use App\Http\Controllers\MasterController; // MasterController di App\Http\Controllers
 use App\Models\Registration;
+use App\Http\Controllers\MasterController;
+use App\Http\Controllers\Api\Admin\RegistrationAdminController;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -30,7 +30,7 @@ Route::prefix('auth')->group(function () {
         'time' => now()->toIso8601String(),
     ]))->name('auth.ping');
 
-    // Rate limiter alias didefinisikan di AppServiceProvider
+    // Rate limiter pakai alias yang didefinisikan di AppServiceProvider
     Route::post('/magic-link/request', [MagicLinkController::class, 'request'])
         ->middleware('throttle:magiclink-email')
         ->name('auth.magiclink.request');
@@ -39,12 +39,12 @@ Route::prefix('auth')->group(function () {
         ->middleware('throttle:magiclink-consume')
         ->name('auth.magiclink.consume');
 
-    // GET fallback agar token bisa diklik dari email
     Route::get('/magic-link/consume/{token}', function (string $token, Request $r) {
         $request = $r->merge(['token' => $token]);
         return app(MagicLinkController::class)->consume($request);
-    })->middleware('throttle:magiclink-consume')
-      ->name('auth.magiclink.consume.get');
+    })
+        ->middleware('throttle:magiclink-consume')
+        ->name('auth.magiclink.consume.get');
 });
 
 /**
@@ -52,7 +52,9 @@ Route::prefix('auth')->group(function () {
  */
 Route::middleware(['auth:sanctum','pat.expires'])->get('/me', function (Request $request) {
     $u = $request->user();
-    if (!$u) return response()->json(['ok' => false, 'error' => 'unauthorized'], 401);
+    if (!$u) {
+        return response()->json(['ok' => false, 'error' => 'unauthorized'], 401);
+    }
     return response()->json([
         'ok' => true,
         'user' => [
@@ -65,16 +67,21 @@ Route::middleware(['auth:sanctum','pat.expires'])->get('/me', function (Request 
 
 Route::middleware(['auth:sanctum','pat.expires'])->post('/logout', function (Request $request) {
     $token = $request->user()?->currentAccessToken();
-    if ($token) $token->delete();
+    if ($token) {
+        $token->delete();
+    }
     return response()->json(['ok' => true]);
 })->name('auth.logout');
 
 /**
- * PROTECTED LOGS (Sanctum Bearer + ENV toggle + whitelist)
+ * PROTECTED LOGS (Sanctum Bearer + ENV toggle + email whitelist)
+ * .env:
+ *   LOG_VIEWER_ENABLED=true
+ *   LOG_VIEWER_EMAILS=agahariiswarajati@gmail.com
  */
 Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 
-    // 0) Ping – cek enable & whitelist
+    // 0) Ping – cepat cek enable & whitelist
     Route::get('/ping', function (Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
         $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
@@ -101,7 +108,9 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
             if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
 
             $base = storage_path('logs');
-            if (!is_dir($base)) return response()->json(['ok' => true, 'path' => $base, 'files' => []]);
+            if (!is_dir($base)) {
+                return response()->json(['ok' => true, 'path' => $base, 'files' => []]);
+            }
 
             $names = @scandir($base) ?: [];
             $files = [];
@@ -127,6 +136,7 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
     })->name('admin.logs.index');
 
     // 2) View (path version)
+    //    Contoh: GET /api/admin/logs/view/laravel.log?raw=1&bytes=131072
     Route::get('/view/{file}', function (string $file, Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
         if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
@@ -136,7 +146,9 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
         if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
 
-        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) {
+            return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        }
 
         $base = realpath(storage_path('logs')) ?: storage_path('logs');
         $full = realpath($base . DIRECTORY_SEPARATOR . $file);
@@ -172,7 +184,8 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         ]);
     })->where('file', '[A-Za-z0-9._-]+')->name('admin.logs.view');
 
-    // 3) View (query version) -> download
+    // 3) View (query version)
+    //    Contoh: GET /api/admin/logs/view?file=laravel.log&raw=1&bytes=131072
     Route::get('/view', function (Request $request) {
         $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
         if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
@@ -184,7 +197,9 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 
         $file = (string) $request->query('file', '');
         if ($file === '') return response()->json(['ok' => false, 'error' => 'file_required'], 400);
-        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) {
+            return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        }
 
         $base = realpath(storage_path('logs')) ?: storage_path('logs');
         $full = realpath($base . DIRECTORY_SEPARATOR . $file);
@@ -192,8 +207,33 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
             return response()->json(['ok' => false, 'error' => 'not_found'], 404);
         }
 
-        return response()->download($full, basename($full), ['Content-Type' => 'text/plain; charset=UTF-8']);
-    })->name('admin.logs.downloadq');
+        $bytes = (int) $request->query('bytes', 65536);
+        $bytes = max(1024, min($bytes, 2 * 1024 * 1024));
+        $size  = @filesize($full) ?: 0;
+        $start = $size > $bytes ? $size - $bytes : 0;
+
+        $fh = @fopen($full, 'rb');
+        if ($fh === false) return response()->json(['ok' => false, 'error' => 'cannot_open'], 500);
+        if ($start > 0) @fseek($fh, $start);
+        $content = @stream_get_contents($fh) ?: '';
+        @fclose($fh);
+
+        if ($request->boolean('raw')) {
+            return response($content, 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
+        }
+
+        return response()->json([
+            'ok'          => true,
+            'file'        => basename($full),
+            'size_bytes'  => $size,
+            'start'       => $start,
+            'end'         => $size,
+            'bytes_read'  => strlen($content),
+            'truncated'   => $start > 0,
+            'modified_at' => date('c', @filemtime($full) ?: time()),
+            'content'     => $content,
+        ]);
+    })->name('admin.logs.viewq');
 
     // 4) Download file penuh (path version)
     Route::get('/download/{file}', function (string $file, Request $request) {
@@ -205,7 +245,9 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
         if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
 
-        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) {
+            return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        }
 
         $base = realpath(storage_path('logs')) ?: storage_path('logs');
         $full = realpath($base . DIRECTORY_SEPARATOR . $file);
@@ -216,7 +258,34 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
         return response()->download($full, basename($full), ['Content-Type' => 'text/plain; charset=UTF-8']);
     })->where('file', '[A-Za-z0-9._-]+')->name('admin.logs.download');
 
-    // 5) Write test – paksa nulis 1 baris ke file log
+    // 5) Download (query version)
+    //    Contoh: GET /api/admin/logs/download?file=laravel-YYYY-MM-DD.log
+    Route::get('/download', function (Request $request) {
+        $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
+        if (!$enabled) return response()->json(['ok' => false, 'error' => 'log_viewer_disabled'], 403);
+
+        $allowed = array_filter(array_map('trim', explode(',', (string) env('LOG_VIEWER_EMAILS', ''))));
+        $email   = strtolower((string) optional($request->user())->email);
+        $okEmail = $email && in_array($email, array_map('strtolower', $allowed), true);
+        if (!$okEmail) return response()->json(['ok' => false, 'error' => 'forbidden'], 403);
+
+        $file = (string) $request->query('file', '');
+        if ($file === '') return response()->json(['ok' => false, 'error' => 'file_required'], 400);
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $file)) {
+            return response()->json(['ok' => false, 'error' => 'bad_filename'], 400);
+        }
+
+        $base = realpath(storage_path('logs')) ?: storage_path('logs');
+        $full = realpath($base . DIRECTORY_SEPARATOR . $file);
+        if (!$full || strncmp($full, $base, strlen($base)) !== 0 || !is_file($full)) {
+            return response()->json(['ok' => false, 'error' => 'not_found'], 404);
+        }
+
+        return response()->download($full, basename($full), ['Content-Type' => 'text/plain; charset=UTF-8']);
+    })->name('admin.logs.downloadq');
+
+    // 6) Write test – paksa nulis 1 baris ke file log
+    //    Contoh: POST /api/admin/logs/write-test
     Route::post('/write-test', function (Request $request) {
         try {
             $enabled = filter_var(env('LOG_VIEWER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
@@ -229,7 +298,9 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 
             $dir = storage_path('logs');
             if (!is_dir($dir)) @mkdir($dir, 0775, true);
-            if (!is_dir($dir)) return response()->json(['ok' => false, 'error' => 'mkdir_failed', 'dir' => $dir], 500);
+            if (!is_dir($dir)) {
+                return response()->json(['ok' => false, 'error' => 'mkdir_failed', 'dir' => $dir], 500);
+            }
 
             $channel = env('LOG_CHANNEL', 'daily');
             $file = $channel === 'daily' ? 'laravel-'.date('Y-m-d').'.log' : 'laravel.log';
@@ -239,7 +310,9 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
                   .' ip='.$request->ip().' ua='.($request->userAgent() ?? '-').PHP_EOL;
 
             $ok = @file_put_contents($full, $line, FILE_APPEND);
-            if ($ok === false) return response()->json(['ok' => false, 'error' => 'write_failed', 'file' => $full], 500);
+            if ($ok === false) {
+                return response()->json(['ok' => false, 'error' => 'write_failed', 'file' => $full], 500);
+            }
 
             @error_log('[WRITE-TEST] wrote to '.$full);
 
@@ -261,20 +334,26 @@ Route::middleware('auth:sanctum')->prefix('admin/logs')->group(function () {
 // Prune token kedaluwarsa tiap 02:30 UTC
 Schedule::command('pat:prune')->dailyAt('02:30');
 
-// NOTE: Route /me tambahan (tanpa 'pat.expires'); biarkan sesuai file kamu
+// NOTE: Route /me berikut ini juga ada (tanpa 'pat.expires').
+// DIBIARKAN sesuai file kamu — jika tidak diperlukan, bisa dihapus nanti.
 Route::middleware('auth:sanctum')->get('/me', function (Request $r) {
   $u = $r->user();
   return ['ok'=>true,'user'=>['id'=>$u->id,'name'=>$u->name,'email'=>$u->email,'role'=>$u->role]];
 });
 
-/**
- * Registrations (publik: throttled)
- */
+// Route::middleware(['auth:sanctum','role:admin,superadmin'])
+//     ->prefix('admin')->group(function () {
+//         Route::get('/ping', fn() => ['ok'=>true,'area'=>'admin']);
+//     });
+
+// publik (rate-limit biar aman)
 Route::middleware('throttle:20,1')->post('/registrations', [RegistrationController::class, 'store']);
 
-/**
- * List untuk FE/admin cepat (tanpa auth)
- */
+// admin list (butuh auth + role)
+// Route::middleware(['auth:sanctum','role:admin,superadmin'])
+//     ->get('/registrations', [RegistrationController::class, 'index']);
+
+// ——— list data untuk FE/admin ———
 Route::middleware('throttle:30,1')->get('/registrations-list', function (Request $r) {
     $q = trim((string) $r->query('q', ''));
 
@@ -298,17 +377,11 @@ Route::middleware('throttle:30,1')->get('/registrations-list', function (Request
     return ['ok' => true, 'data' => $rows];
 });
 
-/**
- * Master data for FE
- */
+// Master data for FE (tetap sesuai Controller yang ada)
 Route::get('/master/yayasan', [MasterController::class, 'yayasan']);
-Route::get('/master/sekolah/cities', [MasterController::class, 'sekolahCities']); // NEW
 Route::get('/master/sekolah', [MasterController::class, 'sekolah']);
 Route::get('/master/perusahaan', [MasterController::class, 'perusahaan']);
 
-/**
- * Admin registrations (butuh auth)
- */
 Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::get('/registrations', [RegistrationAdminController::class, 'index']);   // list + search + paginate
     Route::get('/registrations/{id}', [RegistrationAdminController::class, 'show']); // detail
