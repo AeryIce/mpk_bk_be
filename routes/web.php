@@ -13,3 +13,4 @@ Route::prefix($consolePath)->middleware(['env.basic'])->group(function () {
     Route::get('/', [EnvLogViewerController::class, 'index']);
     Route::get('/download', [EnvLogViewerController::class, 'download']);
 });
+Route::get('/write-test', [EnvLogViewerController::class, 'writeTest']);

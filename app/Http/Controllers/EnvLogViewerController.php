@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Str; 
 use Illuminate\Support\Facades\Response;
 
 class EnvLogViewerController extends Controller
@@ -20,6 +21,13 @@ class EnvLogViewerController extends Controller
         if (!str_starts_with($path, $base)) return null;
         if (!str_ends_with($path, '.log')) return null;
         return $path;
+    }
+    public function writeTest()
+    {
+        $name = 'laravel-'.date('Y-m-d').'.log';
+        $path = storage_path('logs'.DIRECTORY_SEPARATOR.$name);
+        @file_put_contents($path, '['.date('c').'] BK-CONSOLE TEST ❖ '.Str::uuid()->toString().PHP_EOL, FILE_APPEND);
+        return response()->json(['ok' => true, 'file' => $name]);
     }
 
     private function latest(): ?string
